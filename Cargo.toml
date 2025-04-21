@@ -1,0 +1,12 @@
+[package]
+name = "vocab_trainer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+chrono = "0.4.40"
+color-eyre = "0.6.3"
+crossterm = "0.29.0"
+edit-distance = "2.1.3"
+rand = "0.9.1"
+ratatui = "0.29.0"
