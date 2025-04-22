@@ -1,6 +1,7 @@
 use std::collections::VecDeque;
 
 use chrono::{Duration, NaiveDateTime};
+use cli_log;
 use color_eyre::Result;
 use edit_distance::edit_distance;
 use ratatui::{
@@ -15,6 +16,7 @@ use ratatui::{
         canvas::{Canvas, Rectangle},
     },
 };
+use std::io::{BufRead, Write}; // also import logging macros
 
 const DECK_DURATIONS: [Duration; 5] = [
     Duration::days(1),
@@ -25,6 +27,7 @@ const DECK_DURATIONS: [Duration; 5] = [
 ];
 
 fn main() -> Result<()> {
+    cli_log::init_cli_log!();
     color_eyre::install()?;
     let terminal = ratatui::init();
     let app_result = App::new().run(terminal);
@@ -33,23 +36,43 @@ fn main() -> Result<()> {
     // Ok(())
 }
 
-struct VocaCard {
+#[derive(Debug)]
+struct VocaCardDataSet {
+    cards: Vec<Vocab>,
+    file_path: String,
+}
+
+#[derive(Debug)]
+struct Vocab {
     word_a: String,
     word_b: String,
     due_date: Option<NaiveDateTime>,
+    due_date_reverse: Option<NaiveDateTime>,
     deck: Option<u8>,
+    deck_reverse: Option<u8>,
 }
 
-impl VocaCard {
-    fn from_line(line: &str) -> Result<VocaCard, std::io::Error> {
-        let mut parts = line.split('\t');
-        // if parts.len() != 4 && parts.len() != 2 {
-        //     return Err(std::io::Error::new(
-        //         std::io::ErrorKind::InvalidData,
-        //         "Invalid number of fields",
-        //     ));
-        // }
+impl Vocab {
+    fn update_metadata(&mut self, deck: u8, due_date: NaiveDateTime, reverse: bool) {
+        if reverse {
+            self.deck_reverse = Some(deck);
+            self.due_date_reverse = Some(due_date);
+        } else {
+            self.deck = Some(deck);
+            self.due_date = Some(due_date);
+        }
+    }
 
+    fn get_deck(&self, reverse: bool) -> Option<u8> {
+        if reverse {
+            self.deck_reverse
+        } else {
+            self.deck
+        }
+    }
+
+    fn from_line(line: &str) -> Result<Vocab, std::io::Error> {
+        let mut parts = line.split('\t');
         let word_a = parts
             .next()
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing word_a"))?
@@ -58,7 +81,7 @@ impl VocaCard {
             .next()
             .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing word_b"))?
             .to_string();
-        let (deck, due_date) = match parts.next() {
+        let (deck, due_date, deck_b, due_date_b) = match parts.next() {
             Some(deck) => {
                 let deck = deck.parse::<u8>().ok();
                 let date_str = parts
@@ -67,37 +90,102 @@ impl VocaCard {
                         std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing due_date")
                     })?
                     .trim();
-                let date = NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S").ok();
-                (deck, date)
+                let date = NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S")
+                    .expect("Failed to parse date");
+                let deck_b = parts.next().and_then(|d| d.parse::<u8>().ok());
+                let date_b = parts.next().and_then(|d| {
+                    Some(
+                        NaiveDateTime::parse_from_str(d, "%Y-%m-%d %H:%M:%S")
+                            .expect("Failed to parse date"),
+                    )
+                });
+                (deck, Some(date), deck_b, date_b)
             }
-            None => (None, None),
+            None => (None, None, None, None),
         };
 
-        Ok(VocaCard {
+        Ok(Vocab {
             word_a,
             word_b,
             due_date,
             deck,
+            due_date_reverse: due_date_b,
+            deck_reverse: deck_b,
         })
     }
 }
 
+struct VocabTask {
+    query: String,
+    answer: String,
+}
+
+#[derive(Debug)]
+struct VocabItem {
+    dataset: usize,
+    card: usize,
+    reverse: bool,
+}
+
 struct VocaSession {
-    cards: Vec<VocaCard>,
-    queue: VecDeque<usize>,
+    datasets: Vec<VocaCardDataSet>,
+    queue: VecDeque<VocabItem>,
 }
 
 impl VocaSession {
-    fn new(cards: Vec<VocaCard>) -> Self {
+    fn new(datasets: Vec<VocaCardDataSet>) -> Self {
         let mut queue = VecDeque::new();
-        for i in 0..cards.len() {
-            queue.push_back(i);
+        let mut queue_reverse = VecDeque::new();
+        // let mut queue_reverse = VecDeque::new();
+        let current_date = chrono::Local::now().naive_utc();
+        for (i, dataset) in datasets.iter().enumerate() {
+            cli_log::info!("Dataset: {:?}", dataset);
+            for (j, card) in dataset.cards.iter().enumerate() {
+                let add_to_queue = !matches!(card.due_date, Some(date) if date > current_date);
+                cli_log::info!("Card: {:?}, Due Date: {:?}", card, card.due_date);
+                if add_to_queue {
+                    queue.push_back(VocabItem {
+                        dataset: i,
+                        card: j,
+                        reverse: false,
+                    });
+                }
+                let add_to_queue_reverse =
+                    !matches!(card.due_date_reverse, Some(date) if date > current_date);
+                if add_to_queue_reverse {
+                    queue_reverse.push_back(VocabItem {
+                        dataset: i,
+                        card: j,
+                        reverse: true,
+                    });
+                }
+            }
         }
-        VocaSession { cards, queue }
+
+        for item in queue_reverse {
+            queue.push_back(item);
+        }
+        VocaSession { datasets, queue }
     }
 
-    fn current_card(&self) -> Option<&VocaCard> {
-        self.queue.front().and_then(|&index| self.cards.get(index))
+    fn current_task(&self) -> Option<VocabTask> {
+        self.queue.front().and_then(|index| {
+            self.datasets
+                .get(index.dataset)
+                .and_then(|d| d.cards.get(index.card))
+                .map(|card| VocabTask {
+                    query: if index.reverse {
+                        card.word_b.clone()
+                    } else {
+                        card.word_a.clone()
+                    },
+                    answer: if index.reverse {
+                        card.word_a.clone()
+                    } else {
+                        card.word_b.clone()
+                    },
+                })
+        })
     }
 
     fn skip_card(&mut self) {
@@ -107,9 +195,8 @@ impl VocaSession {
     }
 
     fn is_correct(&self, answer: &str) -> bool {
-        if let Some(current_card) = self.queue.front() {
-            let card = &self.cards[*current_card];
-            edit_distance(&card.word_b, answer) < 3
+        if let Some(current_task) = self.current_task() {
+            edit_distance(&current_task.answer, answer) < 3
         } else {
             false
         }
@@ -118,30 +205,90 @@ impl VocaSession {
     fn next_card(&mut self, answer_correct: bool) {
         let current_date = chrono::Local::now().naive_utc();
 
-        let Some(current_card) = self.queue.pop_front() else {
+        let Some(current_item) = self.queue.pop_front() else {
             return;
         };
-        let card = &mut self.cards[current_card];
+        let card = &mut self.datasets[current_item.dataset].cards[current_item.card];
+        let current_deck = card.get_deck(current_item.reverse).unwrap_or(0);
+
         if answer_correct {
-            let new_deck = (card.deck.unwrap_or(0) + 1).min(DECK_DURATIONS.len() as u8 - 1);
-            card.deck = Some(new_deck);
-            card.due_date = Some(current_date + DECK_DURATIONS[new_deck as usize]);
+            let new_deck = (current_deck + 1).min(DECK_DURATIONS.len() as u8 - 1);
+            card.update_metadata(
+                new_deck,
+                current_date + DECK_DURATIONS[new_deck as usize],
+                current_item.reverse,
+            );
         } else {
-            let new_deck = (card.deck.unwrap_or(0) as i16 - 1).max(0) as u8;
-            card.deck = Some(new_deck);
-            card.due_date = Some(current_date + DECK_DURATIONS[new_deck as usize]);
-            self.queue.push_back(current_card);
+            let new_deck = (current_deck as i16 - 1).max(0) as u8;
+            card.update_metadata(
+                new_deck,
+                current_date + DECK_DURATIONS[new_deck as usize],
+                current_item.reverse,
+            );
+            self.queue.push_back(current_item);
         }
     }
 
     #[inline]
     fn current_progress(&self) -> usize {
-        self.cards.len() - self.queue.len()
+        self.total_tasks() - self.queue.len()
     }
 
     #[inline]
-    fn total_cards(&self) -> usize {
-        self.cards.len()
+    fn total_tasks(&self) -> usize {
+        self.datasets
+            .iter()
+            .map(|dataset| dataset.cards.len())
+            .sum::<usize>()
+            * 2usize
+    }
+
+    fn save(&self) -> Result<()> {
+        let current_date = chrono::Local::now().naive_utc();
+        for dataset in &self.datasets {
+            let file_path = &dataset.file_path;
+            let mut file = std::fs::File::create(file_path)?;
+            for card in &dataset.cards {
+                let line = format!(
+                    "{}\t{}\t{}\t{}\t{}\t{}",
+                    card.word_a,
+                    card.word_b,
+                    card.deck.unwrap_or(0),
+                    card.due_date
+                        .unwrap_or(current_date)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string(),
+                    card.deck_reverse.unwrap_or(0),
+                    card.due_date_reverse
+                        .unwrap_or(current_date)
+                        .format("%Y-%m-%d %H:%M:%S")
+                        .to_string()
+                );
+                writeln!(file, "{}", line)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn from_file(file_paths: &[&str]) -> Result<Self> {
+        let mut datasets = Vec::new();
+        for file_path in file_paths {
+            let file = std::fs::File::open(file_path)?;
+            let reader = std::io::BufReader::new(file);
+            let mut cards = Vec::new();
+            for line in reader.lines() {
+                let line = line?;
+                if !line.trim().is_empty() {
+                    let card = Vocab::from_line(&line)?;
+                    cards.push(card);
+                }
+            }
+            datasets.push(VocaCardDataSet {
+                cards,
+                file_path: file_path.to_string(),
+            });
+        }
+        Ok(VocaSession::new(datasets))
     }
 }
 
@@ -149,11 +296,8 @@ impl VocaSession {
 
 /// App holds the state of the application
 struct App {
-    /// Current value of the input box
     input: String,
-    /// Position of cursor in the editor area.
-    character_index: usize,
-    /// Current input mode
+    cursor_pos: usize,
     input_mode: InputMode,
     voca_session: VocaSession,
     current_screen: CurrentScreen,
@@ -179,24 +323,28 @@ impl App {
     fn new() -> App {
         App {
             input: String::new(),
-            character_index: 0,
+            cursor_pos: 0,
             input_mode: InputMode::Normal,
-            voca_session: VocaSession::new(vec![
-                VocaCard::from_line("hello\tworld\t1\t2023-10-01 12:00:00").unwrap(),
-                VocaCard::from_line("foo\tbar\t2\t2023-10-02 12:00:00").unwrap(),
-            ]),
+            voca_session: VocaSession::new(vec![VocaCardDataSet {
+                cards: vec![
+                    Vocab::from_line("hello\tworld").unwrap(),
+                    Vocab::from_line("foo\tbar\t2\t2023-10-02 12:00:00\t2\t2023-10-02 12:00:00")
+                        .unwrap(),
+                ],
+                file_path: "vocab.txt".to_string(),
+            }]),
             current_screen: CurrentScreen::Query,
         }
     }
 
     fn move_cursor_left(&mut self) {
-        let cursor_moved_left = self.character_index.saturating_sub(1);
-        self.character_index = self.clamp_cursor(cursor_moved_left);
+        let cursor_moved_left = self.cursor_pos.saturating_sub(1);
+        self.cursor_pos = self.clamp_cursor(cursor_moved_left);
     }
 
     fn move_cursor_right(&mut self) {
-        let cursor_moved_right = self.character_index.saturating_add(1);
-        self.character_index = self.clamp_cursor(cursor_moved_right);
+        let cursor_moved_right = self.cursor_pos.saturating_add(1);
+        self.cursor_pos = self.clamp_cursor(cursor_moved_right);
     }
 
     fn enter_char(&mut self, new_char: char) {
@@ -213,18 +361,18 @@ impl App {
         self.input
             .char_indices()
             .map(|(i, _)| i)
-            .nth(self.character_index)
+            .nth(self.cursor_pos)
             .unwrap_or(self.input.len())
     }
 
     fn delete_char(&mut self) {
-        let is_not_cursor_leftmost = self.character_index != 0;
+        let is_not_cursor_leftmost = self.cursor_pos != 0;
         if is_not_cursor_leftmost {
             // Method "remove" is not used on the saved text for deleting the selected char.
             // Reason: Using remove on String works on bytes instead of the chars.
             // Using remove would require special care because of char boundaries.
 
-            let current_index = self.character_index;
+            let current_index = self.cursor_pos;
             let from_left_to_current_index = current_index - 1;
 
             // Getting all characters before the selected character.
@@ -244,7 +392,7 @@ impl App {
     }
 
     fn reset_cursor(&mut self) {
-        self.character_index = 0;
+        self.cursor_pos = 0;
     }
 
     fn reset_input(&mut self) {
@@ -262,8 +410,8 @@ impl App {
     fn submit_message(&mut self) {
         let Some(correct_answer) = self
             .voca_session
-            .current_card()
-            .map(|card| card.word_b.clone())
+            .current_task()
+            .map(|card| card.answer.clone())
         else {
             return;
         };
@@ -290,7 +438,11 @@ impl App {
 
     fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         loop {
-            terminal.draw(|frame| self.draw(frame))?;
+            let Some(current_card) = self.voca_session.current_task() else {
+                self.voca_session.save()?;
+                break Ok(());
+            };
+            terminal.draw(|frame| self.draw(frame, &current_card))?;
 
             if let Event::Key(key) = event::read()? {
                 match self.input_mode {
@@ -338,7 +490,7 @@ impl App {
         }
     }
 
-    fn draw(&mut self, frame: &mut Frame) {
+    fn draw(&mut self, frame: &mut Frame, current_card: &VocabTask) {
         let vertical = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(1),
@@ -396,21 +548,20 @@ impl App {
             // rendering
             #[allow(clippy::cast_possible_truncation)]
             InputMode::Editing => frame.set_cursor_position(Position::new(
-                input_area.x + self.character_index as u16 + 1,
+                input_area.x + self.cursor_pos as u16 + 1,
                 input_area.y + 1,
             )),
         }
 
-        let current_card = self.voca_session.current_card().unwrap(); // TODO: Handle None case
         frame.render_widget(
-            Paragraph::new(current_card.word_a.to_string()).block(Block::bordered()),
+            Paragraph::new(current_card.query.to_string()).block(Block::bordered()),
             vocab_prompt_area,
         );
         frame.render_widget(
             format!(
                 "{}/{}",
-                self.voca_session.current_progress(),
-                self.voca_session.total_cards()
+                self.voca_session.current_progress() + 1,
+                self.voca_session.total_tasks()
             ),
             progress,
         );
@@ -452,8 +603,8 @@ mod tests {
 
     #[test]
     fn test_voca_card() {
-        let line = "hello\tworld\t1\t2023-10-01 12:00:00";
-        let card = VocaCard::from_line(line).unwrap();
+        let line = "hello\tworld\t1\t2023-10-01 12:00:00\t2\t2024-10-01 13:00:00";
+        let card = Vocab::from_line(line).unwrap();
         assert_eq!(card.word_a, "hello");
         assert_eq!(card.word_b, "world");
         assert_eq!(card.deck, Some(1));
@@ -461,6 +612,13 @@ mod tests {
             card.due_date,
             Some(
                 NaiveDateTime::parse_from_str("2023-10-01 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
+            )
+        );
+        assert_eq!(card.deck_reverse, Some(2));
+        assert_eq!(
+            card.due_date_reverse,
+            Some(
+                NaiveDateTime::parse_from_str("2024-10-01 13:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
             )
         );
     }
