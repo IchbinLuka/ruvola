@@ -3,20 +3,23 @@ use std::collections::VecDeque;
 use chrono::{Duration, NaiveDateTime};
 use cli_log;
 use color_eyre::Result;
+use config::AppConfig;
 use edit_distance::edit_distance;
 use ratatui::{
     DefaultTerminal, Frame,
-    crossterm::event::{self, Event, KeyCode, KeyEventKind},
-    layout::{Constraint, Layout, Position},
+    crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
+    layout::{Constraint, Flex, Layout, Position, Rect},
     style::{Color, Style, Stylize},
     symbols::Marker,
     text::{Line, Text},
     widgets::{
-        Block, Paragraph,
+        Block, Clear, List, ListDirection, Paragraph, Widget,
         canvas::{Canvas, Rectangle},
     },
 };
 use std::io::{BufRead, Write}; // also import logging macros
+
+mod config;
 
 const DECK_DURATIONS: [Duration; 5] = [
     Duration::days(1),
@@ -30,7 +33,9 @@ fn main() -> Result<()> {
     cli_log::init_cli_log!();
     color_eyre::install()?;
     let terminal = ratatui::init();
-    let app_result = App::new().run(terminal);
+    let config = config::AppConfig::load_from_file()?;
+    cli_log::info!("Config: {:?}", config);
+    let app_result = App::new(config).run(terminal);
     ratatui::restore();
     app_result
     // Ok(())
@@ -40,6 +45,8 @@ fn main() -> Result<()> {
 struct VocaCardDataSet {
     cards: Vec<Vocab>,
     file_path: String,
+    lang_a: String,
+    lang_b: String,
 }
 
 #[derive(Debug)]
@@ -188,6 +195,18 @@ impl VocaSession {
         })
     }
 
+    fn current_target_lang(&self) -> Option<String> {
+        self.queue.front().and_then(|index| {
+            self.datasets.get(index.dataset).map(|d| {
+                if index.reverse {
+                    d.lang_b.clone()
+                } else {
+                    d.lang_a.clone()
+                }
+            })
+        })
+    }
+
     fn skip_card(&mut self) {
         if let Some(index) = self.queue.pop_front() {
             self.queue.push_back(index);
@@ -286,6 +305,8 @@ impl VocaSession {
             datasets.push(VocaCardDataSet {
                 cards,
                 file_path: file_path.to_string(),
+                lang_a: "en".to_string(),
+                lang_b: "de".to_string(),
             });
         }
         Ok(VocaSession::new(datasets))
@@ -301,6 +322,8 @@ struct App {
     input_mode: InputMode,
     voca_session: VocaSession,
     current_screen: CurrentScreen,
+    special_letters_popup: Option<SpecialLettersPopup>,
+    config: config::AppConfig,
 }
 
 enum InputMode {
@@ -320,7 +343,7 @@ enum CurrentScreen {
 }
 
 impl App {
-    fn new() -> App {
+    fn new(config: AppConfig) -> App {
         App {
             input: String::new(),
             cursor_pos: 0,
@@ -332,8 +355,12 @@ impl App {
                         .unwrap(),
                 ],
                 file_path: "vocab.txt".to_string(),
+                lang_a: "it".to_string(),
+                lang_b: "it".to_string(),
             }]),
             current_screen: CurrentScreen::Query,
+            special_letters_popup: None,
+            config,
         }
     }
 
@@ -347,9 +374,28 @@ impl App {
         self.cursor_pos = self.clamp_cursor(cursor_moved_right);
     }
 
-    fn enter_char(&mut self, new_char: char) {
+    fn on_char_input(&mut self, c: char, modifiers: KeyModifiers, target_lang: &str) {
+        if modifiers.contains(KeyModifiers::CONTROL) {
+            if let Some(value) = self
+                .config
+                .special_letters
+                .0
+                .get(target_lang)
+                .and_then(|s| {
+                    s.iter()
+                        .find(|s| s.base == c.to_string())
+                        .map(|s| &s.special)
+                })
+            {
+                self.special_letters_popup = Some(SpecialLettersPopup {
+                    letters: value.iter().map(|s| s.clone()).collect(),
+                });
+                return;
+            }
+        }
+
         let index = self.byte_index();
-        self.input.insert(index, new_char);
+        self.input.insert(index, c);
         self.move_cursor_right();
     }
 
@@ -438,11 +484,31 @@ impl App {
 
     fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         loop {
-            let Some(current_card) = self.voca_session.current_task() else {
+            let (Some(current_card), Some(target_lang)) = (
+                self.voca_session.current_task(),
+                self.voca_session.current_target_lang(),
+            ) else {
                 self.voca_session.save()?;
                 break Ok(());
             };
             terminal.draw(|frame| self.draw(frame, &current_card))?;
+
+            if let Some(popup) = &mut self.special_letters_popup {
+                let result = popup.handle_events();
+                match result {
+                    Ok(SpecialLettersEventResult::Insert(s)) => {
+                        self.input.insert_str(self.byte_index(), &s);
+                        self.special_letters_popup = None;
+                        self.cursor_pos = self.clamp_cursor(self.cursor_pos + s.len());
+                    }
+                    Ok(SpecialLettersEventResult::Cancel) => {
+                        self.special_letters_popup = None;
+                    }
+                    Ok(SpecialLettersEventResult::Ignore) => {}
+                    Err(_) => {}
+                }
+                continue;
+            }
 
             if let Event::Key(key) = event::read()? {
                 match self.input_mode {
@@ -477,7 +543,7 @@ impl App {
                     },
                     InputMode::Editing if key.kind == KeyEventKind::Press => match key.code {
                         KeyCode::Enter => self.submit_message(),
-                        KeyCode::Char(to_insert) => self.enter_char(to_insert),
+                        KeyCode::Char(c) => self.on_char_input(c, key.modifiers, &target_lang),
                         KeyCode::Backspace => self.delete_char(),
                         KeyCode::Left => self.move_cursor_left(),
                         KeyCode::Right => self.move_cursor_right(),
@@ -594,6 +660,106 @@ impl App {
                 correct_answer_area,
             );
         }
+
+        if let Some(popup) = &self.special_letters_popup {
+            popup.draw(frame);
+        }
+    }
+}
+
+struct SpecialLettersPopup {
+    letters: Vec<String>,
+}
+
+enum SpecialLettersEventResult {
+    Insert(String),
+    Cancel,
+    Ignore,
+}
+
+impl Widget for SpecialLettersPopup {
+    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
+        Clear.render(area, buf);
+        // let special_letters = self
+        //     .letters
+        //     .iter()
+        //     .enumerate()
+        //     .flat_map(|(i, s)| )
+        //     .collect::<Vec<String>>();
+
+        List::new(self.letters)
+            .block(Block::default().title("Special Letters"))
+            .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
+            .render(area, buf);
+    }
+}
+
+impl SpecialLettersPopup {
+    fn handle_events(&self) -> Result<SpecialLettersEventResult> {
+        const IGNORE: Result<SpecialLettersEventResult> = Ok(SpecialLettersEventResult::Ignore);
+        let Event::Key(key) = event::read()? else {
+            return IGNORE;
+        };
+        if let KeyCode::Esc = key.code {
+            return Ok(SpecialLettersEventResult::Cancel);
+        }
+        let KeyCode::Char(ch) = key.code else {
+            return IGNORE;
+        };
+        let radix = self.letters.len() as u32 + 1;
+        if !ch.is_digit(radix) {
+            return IGNORE;
+        }
+        let digit = ch.to_digit(radix).expect("Invalid digit") as i32 - 1;
+        if digit >= self.letters.len() as i32 || digit < 0 {
+            return IGNORE;
+        }
+        Ok(SpecialLettersEventResult::Insert(
+            self.letters[digit as usize].clone(),
+        ))
+    }
+
+    fn draw(&self, frame: &mut Frame) {
+        let [area] = Layout::horizontal([Constraint::Percentage(30)])
+            .flex(Flex::Center)
+            .areas(frame.area());
+        let [_, area] = Layout::vertical([Constraint::Percentage(70), Constraint::Percentage(30)])
+            .flex(Flex::Center)
+            .areas(area);
+
+        frame.render_widget(Clear, area);
+        frame.render_widget(Block::bordered().title("Special Letters"), area);
+
+        const MAX_NUM_COLUMNS: usize = 3;
+        let num_columns = self.letters.len().min(MAX_NUM_COLUMNS);
+        let subareas = Layout::horizontal(
+            (0..num_columns)
+                .map(|_| Constraint::Fill(1))
+                .collect::<Vec<_>>(),
+        )
+        .margin(1)
+        .split(area);
+
+        for (i, subarea) in subareas.iter().enumerate() {
+            let items = self
+                .letters
+                .iter()
+                .enumerate()
+                .skip(i)
+                .step_by(num_columns)
+                .map(|(i, s)| format!("{}. {}", i + 1, s));
+            let list =
+                List::new(items).highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
+            frame.render_widget(list, *subarea);
+        }
+
+        // let list = List::new(self.letters.iter().enumerate().map(|(i, s)| format!("{}. {}", i+1, s)))
+        //     .block(Block::bordered().title("Special Letters"))
+        //     .highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
+        // frame.render_widget(list, area);
     }
 }
 
