@@ -1,0 +1,29 @@
+[validation]
+error_tolerance = 2
+tolerance_min_length = 5
+
+[deck_config]
+deck_durations = [0, 1, 7, 14, 30, 60, 90]
+
+[special_letters]
+de = [
+    { base = "a", special = ["Ä", "ä"] }, 
+    { base = "o", special = ["Ö", "ö"] },
+    { base = "u", special = ["Ü", "ü"] },
+    { base = "s", special = ["ẞ", "ß"] },
+]
+it = [
+    { base = "a", special = ["À", "à"] },
+    { base = "e", special = ["É", "é", "È", "è"] },
+    { base = "i", special = ["Ì", "ì"] },
+    { base = "o", special = ["Ò", "ò"] },
+    { base = "u", special = ["Ù", "ù"] },
+]
+fr = [
+    { base = "a", special = ["À", "à", "Â", "â", "Æ", "æ"] },
+    { base = "c", special = ["Ç", "ç"] },
+    { base = "e", special = ["É", "é", "È", "è", "Ê", "ê"] },
+    { base = "i", special = ["Î", "î", "Ï", "ï"] },
+    { base = "o", special = ["Ô", "ô", "Œ", "œ"] },
+    { base = "u", special = ["Ù", "ù", "Û", "û"] },
+]

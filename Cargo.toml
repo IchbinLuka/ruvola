@@ -1,5 +1,6 @@
 [package]
 name = "vocab_trainer"
+description = "A simple TUI based vocabulary trainer."
 version = "0.1.0"
 edition = "2024"
 

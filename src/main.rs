@@ -18,7 +18,7 @@ use ratatui::{
         canvas::{Canvas, Rectangle},
     },
 };
-use std::io::{BufRead, Write}; // also import logging macros
+use std::io::{BufRead, Write};
 
 mod config;
 
@@ -27,7 +27,6 @@ fn main() -> Result<()> {
     cli_log::init_cli_log!();
     color_eyre::install()?;
 
-    // let backend = CrosstermBackend::new(stdout());
     let mut terminal = ratatui::init();
     // Set cursor style to steady bar
     execute!(
@@ -36,19 +35,22 @@ fn main() -> Result<()> {
     )?;
 
     let config = config::AppConfig::load_from_file()?;
-    let session = VocaSession::from_files(&args.file_paths, args.all)?;
+    let session = VocaSession::from_files(&args.file_paths, args.all, args.limit)?;
     let app_result = App::new(config, session).run(terminal);
     ratatui::restore();
     app_result
 }
 
 #[derive(clap::Parser, Debug)]
-#[clap(name = "vocab_trainer")]
+#[clap(name = "vocab_trainer", version, about)]
 struct Arguments {
+    /// Limit for the number of cards to show
     #[arg(short, long)]
-    vocab_limit: Option<usize>,
+    limit: Option<usize>,
+    /// Show all cards, even if they are not due
     #[arg(short, long)]
     all: bool,
+    /// Paths to the vocab files
     file_paths: Vec<String>,
 }
 
@@ -185,16 +187,23 @@ struct VocaSession {
     datasets: Vec<VocaCardDataset>,
     queue: VecDeque<VocabItem>,
     has_changes: bool,
+    total_due: usize,
 }
 
 impl VocaSession {
-    fn new(datasets: Vec<VocaCardDataset>, use_all: bool) -> Self {
+    fn new(datasets: Vec<VocaCardDataset>, use_all: bool, limit: Option<usize>) -> Self {
         let mut queue = VecDeque::new();
         let mut queue_reverse = VecDeque::new();
         // let mut queue_reverse = VecDeque::new();
         let current_date = chrono::Local::now().naive_utc();
         for (i, dataset) in datasets.iter().enumerate() {
             for (j, card) in dataset.cards.iter().enumerate() {
+                if let Some(limit) = limit {
+                    // TODO: In theory it could happen that the limit is exceeded by 1
+                    if queue.len() + queue_reverse.len() >= limit {
+                        break;
+                    }
+                }
                 let add_to_queue =
                     use_all || !matches!(card.due_date, Some(date) if date > current_date);
                 if add_to_queue {
@@ -219,10 +228,12 @@ impl VocaSession {
         for item in queue_reverse {
             queue.push_back(item);
         }
+        let total_due = queue.len();
         VocaSession {
             datasets,
             queue,
             has_changes: false,
+            total_due,
         }
     }
 
@@ -250,9 +261,9 @@ impl VocaSession {
         self.queue.front().and_then(|index| {
             self.datasets.get(index.dataset).map(|d| {
                 if index.reverse {
-                    d.lang_b.clone()
-                } else {
                     d.lang_a.clone()
+                } else {
+                    d.lang_b.clone()
                 }
             })
         })
@@ -302,11 +313,7 @@ impl VocaSession {
 
     #[inline]
     fn total_tasks(&self) -> usize {
-        self.datasets
-            .iter()
-            .map(|dataset| dataset.cards.len())
-            .sum::<usize>()
-            * 2usize
+        self.total_due
     }
 
     fn save(&self) -> Result<()> {
@@ -335,12 +342,12 @@ impl VocaSession {
         Ok(())
     }
 
-    fn from_files(file_paths: &[String], use_all: bool) -> Result<Self> {
+    fn from_files(file_paths: &[String], use_all: bool, limit: Option<usize>) -> Result<Self> {
         let datasets = file_paths
             .iter()
             .map(|file_path| VocaCardDataset::from_file(file_path))
             .collect::<Result<Vec<_>>>()?;
-        Ok(VocaSession::new(datasets, use_all))
+        Ok(VocaSession::new(datasets, use_all, limit))
     }
 }
 
@@ -486,7 +493,11 @@ impl App {
             .next_card(correct, &self.config.deck_config);
         self.current_screen = CurrentScreen::Query;
         self.reset_input();
-        self.input_mode = InputMode::Editing;
+        self.input_mode = if self.voca_session.current_task().is_some() {
+            InputMode::Editing
+        } else {
+            InputMode::Normal
+        };
     }
 
     fn submit_message(&mut self) {
