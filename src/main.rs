@@ -1,19 +1,20 @@
 use std::collections::VecDeque;
 
 use chrono::{Duration, NaiveDateTime};
-use cli_log;
+use clap::Parser;
 use color_eyre::{Result, eyre::OptionExt};
-use config::{AppConfig, DeckConfig};
+use config::{AppConfig, DeckConfig, ValidationConfig};
+use crossterm::execute;
 use edit_distance::edit_distance;
 use ratatui::{
     DefaultTerminal, Frame,
-    crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers},
-    layout::{Constraint, Flex, Layout, Position, Rect},
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
+    layout::{Constraint, Flex, Layout, Position},
     style::{Color, Style, Stylize},
     symbols::Marker,
-    text::{Line, Text},
+    text::{Line, Span, Text},
     widgets::{
-        Block, Clear, List, ListDirection, Paragraph, Widget,
+        Block, Clear, List, Padding, Paragraph, Row, Table, Widget,
         canvas::{Canvas, Rectangle},
     },
 };
@@ -22,15 +23,33 @@ use std::io::{BufRead, Write}; // also import logging macros
 mod config;
 
 fn main() -> Result<()> {
+    let args = Arguments::parse();
     cli_log::init_cli_log!();
     color_eyre::install()?;
-    let terminal = ratatui::init();
+
+    // let backend = CrosstermBackend::new(stdout());
+    let mut terminal = ratatui::init();
+    // Set cursor style to steady bar
+    execute!(
+        terminal.backend_mut(),
+        crossterm::cursor::SetCursorStyle::SteadyBar
+    )?;
+
     let config = config::AppConfig::load_from_file()?;
-    cli_log::info!("Config: {:?}", config);
-    let app_result = App::new(config).run(terminal);
+    let session = VocaSession::from_files(&args.file_paths, args.all)?;
+    let app_result = App::new(config, session).run(terminal);
     ratatui::restore();
     app_result
-    // Ok(())
+}
+
+#[derive(clap::Parser, Debug)]
+#[clap(name = "vocab_trainer")]
+struct Arguments {
+    #[arg(short, long)]
+    vocab_limit: Option<usize>,
+    #[arg(short, long)]
+    all: bool,
+    file_paths: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -121,11 +140,9 @@ impl Vocab {
                 let date = NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S")
                     .expect("Failed to parse date");
                 let deck_b = parts.next().and_then(|d| d.parse::<u8>().ok());
-                let date_b = parts.next().and_then(|d| {
-                    Some(
-                        NaiveDateTime::parse_from_str(d, "%Y-%m-%d %H:%M:%S")
-                            .expect("Failed to parse date"),
-                    )
+                let date_b = parts.next().map(|d| {
+                    NaiveDateTime::parse_from_str(d, "%Y-%m-%d %H:%M:%S")
+                        .expect("Failed to parse date")
                 });
                 (deck, Some(date), deck_b, date_b)
             }
@@ -148,6 +165,15 @@ struct VocabTask {
     answer: String,
 }
 
+impl VocabTask {
+    fn is_correct(&self, answer: &str, val_config: &ValidationConfig) -> bool {
+        if self.answer.len() < val_config.tolerance_min_length {
+            return self.answer == answer;
+        }
+        edit_distance(&self.answer, answer) <= val_config.error_tolerance
+    }
+}
+
 #[derive(Debug)]
 struct VocabItem {
     dataset: usize,
@@ -158,19 +184,19 @@ struct VocabItem {
 struct VocaSession {
     datasets: Vec<VocaCardDataset>,
     queue: VecDeque<VocabItem>,
+    has_changes: bool,
 }
 
 impl VocaSession {
-    fn new(datasets: Vec<VocaCardDataset>) -> Self {
+    fn new(datasets: Vec<VocaCardDataset>, use_all: bool) -> Self {
         let mut queue = VecDeque::new();
         let mut queue_reverse = VecDeque::new();
         // let mut queue_reverse = VecDeque::new();
         let current_date = chrono::Local::now().naive_utc();
         for (i, dataset) in datasets.iter().enumerate() {
-            cli_log::info!("Dataset: {:?}", dataset);
             for (j, card) in dataset.cards.iter().enumerate() {
-                let add_to_queue = !matches!(card.due_date, Some(date) if date > current_date);
-                cli_log::info!("Card: {:?}, Due Date: {:?}", card, card.due_date);
+                let add_to_queue =
+                    use_all || !matches!(card.due_date, Some(date) if date > current_date);
                 if add_to_queue {
                     queue.push_back(VocabItem {
                         dataset: i,
@@ -179,7 +205,7 @@ impl VocaSession {
                     });
                 }
                 let add_to_queue_reverse =
-                    !matches!(card.due_date_reverse, Some(date) if date > current_date);
+                    use_all || !matches!(card.due_date_reverse, Some(date) if date > current_date);
                 if add_to_queue_reverse {
                     queue_reverse.push_back(VocabItem {
                         dataset: i,
@@ -193,7 +219,11 @@ impl VocaSession {
         for item in queue_reverse {
             queue.push_back(item);
         }
-        VocaSession { datasets, queue }
+        VocaSession {
+            datasets,
+            queue,
+            has_changes: false,
+        }
     }
 
     fn current_task(&self) -> Option<VocabTask> {
@@ -234,14 +264,6 @@ impl VocaSession {
         }
     }
 
-    fn is_correct(&self, answer: &str) -> bool {
-        if let Some(current_task) = self.current_task() {
-            edit_distance(&current_task.answer, answer) < 3
-        } else {
-            false
-        }
-    }
-
     fn next_card(&mut self, answer_correct: bool, deck_config: &DeckConfig) {
         let current_date = chrono::Local::now().naive_utc();
 
@@ -270,6 +292,7 @@ impl VocaSession {
             );
             self.queue.push_back(current_item);
         }
+        self.has_changes = true;
     }
 
     #[inline]
@@ -291,6 +314,7 @@ impl VocaSession {
         for dataset in &self.datasets {
             let file_path = &dataset.file_path;
             let mut file = std::fs::File::create(file_path)?;
+            writeln!(file, "{}\t{}", dataset.lang_a, dataset.lang_b)?;
             for card in &dataset.cards {
                 let line = format!(
                     "{}\t{}\t{}\t{}\t{}\t{}",
@@ -299,13 +323,11 @@ impl VocaSession {
                     card.deck.unwrap_or(0),
                     card.due_date
                         .unwrap_or(current_date)
-                        .format("%Y-%m-%d %H:%M:%S")
-                        .to_string(),
+                        .format("%Y-%m-%d %H:%M:%S"),
                     card.deck_reverse.unwrap_or(0),
                     card.due_date_reverse
                         .unwrap_or(current_date)
                         .format("%Y-%m-%d %H:%M:%S")
-                        .to_string()
                 );
                 writeln!(file, "{}", line)?;
             }
@@ -313,12 +335,12 @@ impl VocaSession {
         Ok(())
     }
 
-    fn from_files(file_paths: &[&str]) -> Result<Self> {
+    fn from_files(file_paths: &[String], use_all: bool) -> Result<Self> {
         let datasets = file_paths
             .iter()
-            .map(|&file_path| VocaCardDataset::from_file(file_path))
+            .map(|file_path| VocaCardDataset::from_file(file_path))
             .collect::<Result<Vec<_>>>()?;
-        Ok(VocaSession::new(datasets))
+        Ok(VocaSession::new(datasets, use_all))
     }
 }
 
@@ -333,6 +355,7 @@ struct App {
     current_screen: CurrentScreen,
     special_letters_popup: Option<SpecialLettersPopup>,
     config: config::AppConfig,
+    show_help: bool,
 }
 
 enum InputMode {
@@ -342,7 +365,6 @@ enum InputMode {
 
 struct Review {
     correct: bool,
-    answer: String,
     correct_answer: String,
 }
 
@@ -351,24 +373,21 @@ enum CurrentScreen {
     Review(Review),
 }
 
+enum KeyHandleResult {
+    Quit { save: bool },
+    None,
+}
+
 impl App {
-    fn new(config: AppConfig) -> App {
+    fn new(config: AppConfig, session: VocaSession) -> App {
         App {
             input: String::new(),
             cursor_pos: 0,
             input_mode: InputMode::Normal,
-            voca_session: VocaSession::new(vec![VocaCardDataset {
-                cards: vec![
-                    Vocab::from_line("hello\tworld").unwrap(),
-                    Vocab::from_line("foo\tbar\t2\t2023-10-02 12:00:00\t2\t2023-10-02 12:00:00")
-                        .unwrap(),
-                ],
-                file_path: "vocab.txt".to_string(),
-                lang_a: "it".to_string(),
-                lang_b: "it".to_string(),
-            }]),
+            voca_session: session,
             current_screen: CurrentScreen::Query,
             special_letters_popup: None,
+            show_help: false,
             config,
         }
     }
@@ -383,9 +402,12 @@ impl App {
         self.cursor_pos = self.clamp_cursor(cursor_moved_right);
     }
 
-    fn on_char_input(&mut self, c: char, modifiers: KeyModifiers, target_lang: &str) {
+    fn on_char_input(&mut self, c: char, modifiers: KeyModifiers) {
+        let Some(target_lang) = self.voca_session.current_target_lang() else {
+            return;
+        };
         if modifiers.contains(KeyModifiers::CONTROL) {
-            let Some(lang_chars) = self.config.special_letters.0.get(target_lang) else {
+            let Some(lang_chars) = self.config.special_letters.0.get(&target_lang) else {
                 return;
             };
             let popup = match c {
@@ -397,19 +419,12 @@ impl App {
                         .collect();
                     Some(SpecialLettersPopup { letters })
                 }
-                c => {
-                    if let Some(value) = lang_chars
-                        .iter()
-                        .find(|s| s.base == c.to_string())
-                        .map(|s| &s.special)
-                    {
-                        Some(SpecialLettersPopup {
-                            letters: value.iter().cloned().collect(),
-                        })
-                    } else {
-                        None
-                    }
-                }
+                c => lang_chars
+                    .iter()
+                    .find(|s| s.base == c.to_string())
+                    .map(|s| SpecialLettersPopup {
+                        letters: s.special.to_vec(),
+                    }),
             };
             self.special_letters_popup = popup;
         } else {
@@ -475,20 +490,16 @@ impl App {
     }
 
     fn submit_message(&mut self) {
-        let Some(correct_answer) = self
-            .voca_session
-            .current_task()
-            .map(|card| card.answer.clone())
-        else {
+        let Some(current_task) = self.voca_session.current_task() else {
             return;
         };
+        let correct_answer = current_task.answer.clone();
         let answer = self.input.clone();
-        let correct = self.voca_session.is_correct(answer.as_str());
+        let correct = current_task.is_correct(answer.as_str(), &self.config.validation);
         match &self.current_screen {
             CurrentScreen::Query => {
                 self.current_screen = CurrentScreen::Review(Review {
                     correct,
-                    answer: self.input.clone(),
                     correct_answer,
                 });
             }
@@ -503,16 +514,58 @@ impl App {
         self.input_mode = InputMode::Normal;
     }
 
+    fn handle_key_events(&mut self, event: KeyEvent) -> KeyHandleResult {
+        match self.input_mode {
+            InputMode::Normal => match event.code {
+                KeyCode::Char('e') => {
+                    self.input_mode = InputMode::Editing;
+                }
+                KeyCode::Char('Q') => {
+                    return KeyHandleResult::Quit { save: false };
+                }
+                KeyCode::Char('w') => {
+                    return KeyHandleResult::Quit { save: true };
+                }
+                KeyCode::Enter => {
+                    if let CurrentScreen::Review(review) = &self.current_screen {
+                        if review.correct {
+                            self.next_card(true);
+                        }
+                    }
+                }
+                KeyCode::Char('a') => {
+                    if let CurrentScreen::Review(review) = &self.current_screen {
+                        if !review.correct {
+                            self.next_card(true);
+                        }
+                    }
+                }
+                KeyCode::Char('s') => {
+                    self.reset_input();
+                    self.voca_session.skip_card();
+                }
+                KeyCode::Char('h') => {
+                    self.show_help = !self.show_help;
+                }
+                _ => {}
+            },
+            InputMode::Editing if event.kind == KeyEventKind::Press => match event.code {
+                KeyCode::Enter => self.submit_message(),
+                KeyCode::Char(c) => self.on_char_input(c, event.modifiers),
+                KeyCode::Backspace => self.delete_char(),
+                KeyCode::Left => self.move_cursor_left(),
+                KeyCode::Right => self.move_cursor_right(),
+                KeyCode::Esc => self.input_mode = InputMode::Normal,
+                _ => {}
+            },
+            InputMode::Editing => {}
+        };
+        KeyHandleResult::None
+    }
+
     fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         loop {
-            let (Some(current_card), Some(target_lang)) = (
-                self.voca_session.current_task(),
-                self.voca_session.current_target_lang(),
-            ) else {
-                self.voca_session.save()?;
-                break Ok(());
-            };
-            terminal.draw(|frame| self.draw(frame, &current_card))?;
+            terminal.draw(|frame| self.draw(frame))?;
 
             if let Some(popup) = &mut self.special_letters_popup {
                 let result = popup.handle_events();
@@ -532,52 +585,30 @@ impl App {
             }
 
             if let Event::Key(key) = event::read()? {
-                match self.input_mode {
-                    InputMode::Normal => match key.code {
-                        KeyCode::Char('e') => {
-                            self.input_mode = InputMode::Editing;
+                match self.handle_key_events(key) {
+                    KeyHandleResult::Quit { save } => {
+                        if save {
+                            self.voca_session.save()?;
                         }
-                        KeyCode::Char('q') => {
-                            return Ok(());
-                        }
-                        KeyCode::Enter => {
-                            let CurrentScreen::Review(review) = &self.current_screen else {
-                                continue;
-                            };
-                            if review.correct {
-                                self.next_card(true);
-                            }
-                        }
-                        KeyCode::Char('a') => {
-                            let CurrentScreen::Review(review) = &self.current_screen else {
-                                continue;
-                            };
-                            if !review.correct {
-                                self.next_card(true);
-                            }
-                        }
-                        KeyCode::Char('s') => {
-                            self.reset_input();
-                            self.voca_session.skip_card();
-                        }
-                        _ => {}
-                    },
-                    InputMode::Editing if key.kind == KeyEventKind::Press => match key.code {
-                        KeyCode::Enter => self.submit_message(),
-                        KeyCode::Char(c) => self.on_char_input(c, key.modifiers, &target_lang),
-                        KeyCode::Backspace => self.delete_char(),
-                        KeyCode::Left => self.move_cursor_left(),
-                        KeyCode::Right => self.move_cursor_right(),
-                        KeyCode::Esc => self.input_mode = InputMode::Normal,
-                        _ => {}
-                    },
-                    InputMode::Editing => {}
+                        break Ok(());
+                    }
+                    KeyHandleResult::None => {}
                 }
             }
         }
     }
 
-    fn draw(&mut self, frame: &mut Frame, current_card: &VocabTask) {
+    fn draw(&mut self, frame: &mut Frame) {
+        let Some(current_card) = self.voca_session.current_task() else {
+            frame.render_widget(
+                NoCardsLeftScreen {
+                    has_changes: self.voca_session.has_changes,
+                },
+                frame.area(),
+            );
+            return;
+        };
+
         let vertical = Layout::vertical([
             Constraint::Length(1),
             Constraint::Min(1),
@@ -599,21 +630,13 @@ impl App {
             InputMode::Normal if is_review => {
                 vec!["Press ".into(), "a".bold(), " to accept anyway".into()]
             }
-            InputMode::Normal => vec![
-                "Press ".into(),
-                "q".bold(),
-                " to exit, ".into(),
-                "e".bold(),
-                " to start editing, ".into(),
-                "s".bold(),
-                " to skip the card".into(),
-            ],
+            InputMode::Normal => vec!["Press ".into(), "h".bold(), " to show keybinds".into()],
             InputMode::Editing => vec![
                 "Press ".into(),
                 "Esc".bold(),
                 " to stop editing, ".into(),
                 "Enter".bold(),
-                " to record the message".into(),
+                " to submit".into(),
             ],
         };
         let text = Text::from(Line::from(msg));
@@ -623,7 +646,7 @@ impl App {
         let input = Paragraph::new(self.input.as_str())
             .style(match self.input_mode {
                 InputMode::Normal => Style::default(),
-                InputMode::Editing => Style::default().fg(Color::Yellow),
+                InputMode::Editing => Style::default().fg(Color::LightBlue),
             })
             .block(Block::bordered().title("Input"));
         frame.render_widget(input, input_area);
@@ -667,10 +690,10 @@ impl App {
                 .marker(Marker::HalfBlock)
                 .paint(|ctx| {
                     ctx.draw(&Rectangle {
-                        x: 0.5,
-                        y: 0.5,
-                        width: (area.width - 1) as f64,
-                        height: (area.height - 1) as f64,
+                        x: 0.0,
+                        y: 0.0,
+                        width: area.width as f64,
+                        height: area.height as f64,
                         color: if *correct { Color::Green } else { Color::Red },
                     });
                 });
@@ -680,10 +703,15 @@ impl App {
                     .block(Block::bordered().title("Correct Answer")),
                 correct_answer_area,
             );
+        } else {
+            frame.render_widget(Block::bordered(), correct_answer_area);
         }
 
         if let Some(popup) = &self.special_letters_popup {
             popup.draw(frame);
+        }
+        if self.show_help {
+            HelpWidget.draw(frame);
         }
     }
 }
@@ -755,6 +783,120 @@ impl SpecialLettersPopup {
             let list = List::new(items);
             frame.render_widget(list, *subarea);
         }
+    }
+}
+
+struct NoCardsLeftScreen {
+    has_changes: bool,
+}
+
+impl Widget for NoCardsLeftScreen {
+    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
+        let title = Text::raw("No cards left!").bold();
+
+        let [title_area, _, keys_area] = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ])
+        .flex(Flex::Center)
+        .areas(area);
+
+        let [title_area] = Layout::horizontal([Constraint::Length(title.width() as u16)])
+            .flex(Flex::Center)
+            .areas(title_area);
+        title.render(title_area, buf);
+
+        let keys = Text::raw(if self.has_changes {
+            "Press 'w' to save changes and exit\nPress 'Q' to exit without saving"
+        } else {
+            "Press 'Q' to exit"
+        });
+
+        let [keys_area] = Layout::horizontal([Constraint::Length(keys.width() as u16)])
+            .flex(Flex::Center)
+            .areas(keys_area);
+        keys.render(keys_area, buf);
+    }
+}
+
+struct HelpWidget;
+
+impl HelpWidget {
+    fn draw(&self, frame: &mut Frame) {
+        const KEYBINDINGS: [(&str, &str); 7] = [
+            ("Q", "Quit without saving"),
+            ("w", "Save and quit"),
+            ("a", "Accept anyway"),
+            ("Esc", "Stop editing"),
+            ("Ctrl+Space", "Show special letters (in edit mode)"),
+            ("e", "Enter edit mode"),
+            ("s", "Skip"),
+        ];
+        let rows = KEYBINDINGS
+            .iter()
+            .map(|(key, desc)| {
+                let key = Text::from(Line::from(vec![key.bold(), ": ".into()]));
+                let desc = Text::from(Into::<Span<'_>>::into(*desc));
+                Row::new([key, desc])
+            })
+            .collect::<Vec<_>>();
+
+        let keys_width = KEYBINDINGS
+            .iter()
+            .map(|(key, _)| key.len())
+            .max()
+            .unwrap_or(0) as u16
+            + 1;
+        let desc_width = KEYBINDINGS.iter().map(|(_, d)| d.len()).max().unwrap_or(0) as u16;
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(keys_width),
+                Constraint::Length(desc_width),
+            ],
+        )
+        .block(
+            Block::bordered()
+                .title("Keybindings")
+                .padding(Padding::uniform(1)),
+        );
+
+        let [help_area] = Layout::horizontal([Constraint::Max(keys_width + desc_width + 3)])
+            .flex(Flex::Center)
+            .areas(frame.area());
+        let [help_area] = Layout::vertical([Constraint::Max(KEYBINDINGS.len() as u16 + 2)])
+            .flex(Flex::Center)
+            .areas(help_area);
+        frame.render_widget(Clear, help_area);
+        frame.render_widget(table, help_area);
+    }
+}
+
+impl Widget for HelpWidget {
+    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
+        const KEYBINDINGS: [(&str, &str); 7] = [
+            ("Q", "Quit without saving"),
+            ("w", "Save and quit"),
+            ("a", "Accept anyway"),
+            ("Esc", "Stop editing"),
+            ("Ctrl+Space", "Show special letters (in edit mode)"),
+            ("e", "Enter edit mode"),
+            ("s", "Skip"),
+        ];
+
+        Clear.render(area, buf);
+        List::new(KEYBINDINGS.iter().map(|(key, desc)| {
+            Text::from(Line::from(vec![key.bold(), ": ".into(), (*desc).into()]))
+        }))
+        .block(Block::bordered().title("Keybindings"))
+        .render(area, buf);
     }
 }
 

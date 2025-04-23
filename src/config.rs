@@ -2,21 +2,14 @@ use color_eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, io::Write};
 
-#[derive(Deserialize, Serialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Default)]
 pub struct AppConfig {
+    #[serde(default)]
+    pub validation: ValidationConfig,
+    #[serde(default)]
     pub deck_config: DeckConfig,
+    #[serde(default)]
     pub special_letters: SpecialLetters,
-}
-
-impl Default for AppConfig {
-    fn default() -> Self {
-        AppConfig {
-            deck_config: DeckConfig {
-                deck_durations: vec![1, 7, 14, 30, 60, 90, 180, 365],
-            },
-            special_letters: SpecialLetters(HashMap::new()),
-        }
-    }
 }
 
 impl AppConfig {
@@ -45,6 +38,21 @@ impl AppConfig {
 }
 
 #[derive(Deserialize, Serialize, Debug)]
+pub struct ValidationConfig {
+    pub error_tolerance: usize,
+    pub tolerance_min_length: usize,
+}
+
+impl Default for ValidationConfig {
+    fn default() -> Self {
+        Self {
+            error_tolerance: 2,
+            tolerance_min_length: 5,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, Default)]
 pub struct SpecialLetters(pub HashMap<String, Vec<SpecialLettersConfig>>);
 
 #[derive(Deserialize, Serialize, Debug)]
@@ -56,6 +64,14 @@ pub struct SpecialLettersConfig {
 #[derive(Deserialize, Serialize, Debug)]
 pub struct DeckConfig {
     pub deck_durations: Vec<u32>,
+}
+
+impl Default for DeckConfig {
+    fn default() -> Self {
+        Self {
+            deck_durations: vec![1, 7, 14, 30, 60, 90, 180, 365],
+        }
+    }
 }
 
 #[cfg(target_os = "linux")]

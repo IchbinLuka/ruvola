@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 chrono = "0.4.40"
+clap = { version = "4.5.37", features = ["derive"] }
 cli-log = "2.1.0"
 color-eyre = "0.6.3"
 confy = "0.6.1"
