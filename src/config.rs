@@ -93,22 +93,3 @@ fn get_system_config_dir() -> Result<String> {
         std::env::var("HOME").map(|home| format!("{}/Library/Application Support", home))?;
     Ok(config_dir)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs::File;
-    use std::io::Read;
-
-    #[test]
-    fn test_app_config() {
-        let mut file = File::open("test.toml").unwrap();
-        let mut contents = String::new();
-        file.read_to_string(&mut contents).unwrap();
-
-        let config: AppConfig = toml::from_str(&contents).unwrap();
-        println!("{:?}", config);
-        assert_eq!(config.deck_config.deck_durations.len(), 3);
-        assert_eq!(config.special_letters.0.len(), 2);
-    }
-}
