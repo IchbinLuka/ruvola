@@ -2,8 +2,8 @@ use std::collections::VecDeque;
 
 use chrono::{Duration, NaiveDateTime};
 use cli_log;
-use color_eyre::Result;
-use config::AppConfig;
+use color_eyre::{Result, eyre::OptionExt};
+use config::{AppConfig, DeckConfig};
 use edit_distance::edit_distance;
 use ratatui::{
     DefaultTerminal, Frame,
@@ -21,14 +21,6 @@ use std::io::{BufRead, Write}; // also import logging macros
 
 mod config;
 
-const DECK_DURATIONS: [Duration; 5] = [
-    Duration::days(1),
-    Duration::days(3),
-    Duration::days(7),
-    Duration::days(14),
-    Duration::days(30),
-];
-
 fn main() -> Result<()> {
     cli_log::init_cli_log!();
     color_eyre::install()?;
@@ -42,11 +34,40 @@ fn main() -> Result<()> {
 }
 
 #[derive(Debug)]
-struct VocaCardDataSet {
+struct VocaCardDataset {
     cards: Vec<Vocab>,
     file_path: String,
     lang_a: String,
     lang_b: String,
+}
+
+impl VocaCardDataset {
+    fn from_file(file_path: &str) -> Result<Self> {
+        let file = std::fs::File::open(file_path)?;
+        let reader = std::io::BufReader::new(file);
+        let mut cards = Vec::new();
+        let mut lines = reader.lines();
+        let header = lines.next().ok_or_eyre("Empty file")??;
+        let mut parts = header.split('\t');
+        let lang_a = parts
+            .next()
+            .ok_or_eyre("Missing language header")?
+            .to_string();
+        let lang_b = parts.next().ok_or_eyre("Invalid header")?.to_string();
+        for line in lines {
+            let line = line?;
+            if !line.trim().is_empty() {
+                let card = Vocab::from_line(&line)?;
+                cards.push(card);
+            }
+        }
+        Ok(VocaCardDataset {
+            cards,
+            file_path: file_path.to_string(),
+            lang_a,
+            lang_b,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -135,12 +156,12 @@ struct VocabItem {
 }
 
 struct VocaSession {
-    datasets: Vec<VocaCardDataSet>,
+    datasets: Vec<VocaCardDataset>,
     queue: VecDeque<VocabItem>,
 }
 
 impl VocaSession {
-    fn new(datasets: Vec<VocaCardDataSet>) -> Self {
+    fn new(datasets: Vec<VocaCardDataset>) -> Self {
         let mut queue = VecDeque::new();
         let mut queue_reverse = VecDeque::new();
         // let mut queue_reverse = VecDeque::new();
@@ -221,27 +242,30 @@ impl VocaSession {
         }
     }
 
-    fn next_card(&mut self, answer_correct: bool) {
+    fn next_card(&mut self, answer_correct: bool, deck_config: &DeckConfig) {
         let current_date = chrono::Local::now().naive_utc();
 
         let Some(current_item) = self.queue.pop_front() else {
             return;
         };
-        let card = &mut self.datasets[current_item.dataset].cards[current_item.card];
-        let current_deck = card.get_deck(current_item.reverse).unwrap_or(0);
+
+        let deck_durations = &deck_config.deck_durations;
+
+        let card_mut = &mut self.datasets[current_item.dataset].cards[current_item.card];
+        let current_deck = card_mut.get_deck(current_item.reverse).unwrap_or(0);
 
         if answer_correct {
-            let new_deck = (current_deck + 1).min(DECK_DURATIONS.len() as u8 - 1);
-            card.update_metadata(
+            let new_deck = (current_deck + 1).min(deck_durations.len() as u8 - 1);
+            card_mut.update_metadata(
                 new_deck,
-                current_date + DECK_DURATIONS[new_deck as usize],
+                current_date + Duration::days(deck_durations[new_deck as usize] as i64),
                 current_item.reverse,
             );
         } else {
             let new_deck = (current_deck as i16 - 1).max(0) as u8;
-            card.update_metadata(
+            card_mut.update_metadata(
                 new_deck,
-                current_date + DECK_DURATIONS[new_deck as usize],
+                current_date + Duration::days(deck_durations[new_deck as usize] as i64),
                 current_item.reverse,
             );
             self.queue.push_back(current_item);
@@ -289,26 +313,11 @@ impl VocaSession {
         Ok(())
     }
 
-    fn from_file(file_paths: &[&str]) -> Result<Self> {
-        let mut datasets = Vec::new();
-        for file_path in file_paths {
-            let file = std::fs::File::open(file_path)?;
-            let reader = std::io::BufReader::new(file);
-            let mut cards = Vec::new();
-            for line in reader.lines() {
-                let line = line?;
-                if !line.trim().is_empty() {
-                    let card = Vocab::from_line(&line)?;
-                    cards.push(card);
-                }
-            }
-            datasets.push(VocaCardDataSet {
-                cards,
-                file_path: file_path.to_string(),
-                lang_a: "en".to_string(),
-                lang_b: "de".to_string(),
-            });
-        }
+    fn from_files(file_paths: &[&str]) -> Result<Self> {
+        let datasets = file_paths
+            .iter()
+            .map(|&file_path| VocaCardDataset::from_file(file_path))
+            .collect::<Result<Vec<_>>>()?;
         Ok(VocaSession::new(datasets))
     }
 }
@@ -348,7 +357,7 @@ impl App {
             input: String::new(),
             cursor_pos: 0,
             input_mode: InputMode::Normal,
-            voca_session: VocaSession::new(vec![VocaCardDataSet {
+            voca_session: VocaSession::new(vec![VocaCardDataset {
                 cards: vec![
                     Vocab::from_line("hello\tworld").unwrap(),
                     Vocab::from_line("foo\tbar\t2\t2023-10-02 12:00:00\t2\t2023-10-02 12:00:00")
@@ -376,27 +385,38 @@ impl App {
 
     fn on_char_input(&mut self, c: char, modifiers: KeyModifiers, target_lang: &str) {
         if modifiers.contains(KeyModifiers::CONTROL) {
-            if let Some(value) = self
-                .config
-                .special_letters
-                .0
-                .get(target_lang)
-                .and_then(|s| {
-                    s.iter()
+            let Some(lang_chars) = self.config.special_letters.0.get(target_lang) else {
+                return;
+            };
+            let popup = match c {
+                ' ' => {
+                    let letters = lang_chars
+                        .iter()
+                        .flat_map(|s| s.special.iter())
+                        .cloned()
+                        .collect();
+                    Some(SpecialLettersPopup { letters })
+                }
+                c => {
+                    if let Some(value) = lang_chars
+                        .iter()
                         .find(|s| s.base == c.to_string())
                         .map(|s| &s.special)
-                })
-            {
-                self.special_letters_popup = Some(SpecialLettersPopup {
-                    letters: value.iter().map(|s| s.clone()).collect(),
-                });
-                return;
-            }
+                    {
+                        Some(SpecialLettersPopup {
+                            letters: value.iter().cloned().collect(),
+                        })
+                    } else {
+                        None
+                    }
+                }
+            };
+            self.special_letters_popup = popup;
+        } else {
+            let index = self.byte_index();
+            self.input.insert(index, c);
+            self.move_cursor_right();
         }
-
-        let index = self.byte_index();
-        self.input.insert(index, c);
-        self.move_cursor_right();
     }
 
     /// Returns the byte index based on the character position.
@@ -447,7 +467,8 @@ impl App {
     }
 
     fn next_card(&mut self, correct: bool) {
-        self.voca_session.next_card(correct);
+        self.voca_session
+            .next_card(correct, &self.config.deck_config);
         self.current_screen = CurrentScreen::Query;
         self.reset_input();
         self.input_mode = InputMode::Editing;
@@ -677,26 +698,6 @@ enum SpecialLettersEventResult {
     Ignore,
 }
 
-impl Widget for SpecialLettersPopup {
-    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
-    where
-        Self: Sized,
-    {
-        Clear.render(area, buf);
-        // let special_letters = self
-        //     .letters
-        //     .iter()
-        //     .enumerate()
-        //     .flat_map(|(i, s)| )
-        //     .collect::<Vec<String>>();
-
-        List::new(self.letters)
-            .block(Block::default().title("Special Letters"))
-            .highlight_style(Style::default().bg(Color::Blue).fg(Color::White))
-            .render(area, buf);
-    }
-}
-
 impl SpecialLettersPopup {
     fn handle_events(&self) -> Result<SpecialLettersEventResult> {
         const IGNORE: Result<SpecialLettersEventResult> = Ok(SpecialLettersEventResult::Ignore);
@@ -750,16 +751,10 @@ impl SpecialLettersPopup {
                 .enumerate()
                 .skip(i)
                 .step_by(num_columns)
-                .map(|(i, s)| format!("{}. {}", i + 1, s));
-            let list =
-                List::new(items).highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
+                .map(|(i, s)| format!("{:x}. {}", i + 1, s));
+            let list = List::new(items);
             frame.render_widget(list, *subarea);
         }
-
-        // let list = List::new(self.letters.iter().enumerate().map(|(i, s)| format!("{}. {}", i+1, s)))
-        //     .block(Block::bordered().title("Special Letters"))
-        //     .highlight_style(Style::default().bg(Color::Blue).fg(Color::White));
-        // frame.render_widget(list, area);
     }
 }
 
