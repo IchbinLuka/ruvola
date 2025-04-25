@@ -1,4 +1,4 @@
-use color_eyre::Result;
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, io::Write};
 
