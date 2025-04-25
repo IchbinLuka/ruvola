@@ -10,6 +10,7 @@ use std::io::Write;
 pub struct VocabTask {
     pub query: String,
     pub answer: String,
+    pub show_answer: bool,
 }
 
 impl VocabTask {
@@ -26,6 +27,7 @@ struct VocabItem {
     dataset: usize,
     card: usize,
     reverse: bool,
+    memorization_card: bool,
 }
 
 pub struct VocaSession {
@@ -37,25 +39,36 @@ pub struct VocaSession {
 
 impl VocaSession {
     fn new(datasets: Vec<VocaCardDataset>, use_all: bool, limit: Option<usize>) -> Self {
-        let mut queue = VecDeque::new();
+        let mut queue_seen = VecDeque::new();
         let mut queue_reverse = VecDeque::new();
+        let mut queue_unseen = VecDeque::new();
         // let mut queue_reverse = VecDeque::new();
         let current_date = chrono::Local::now().naive_utc();
         for (i, dataset) in datasets.iter().enumerate() {
             for (j, card) in dataset.cards.iter().enumerate() {
+                if card.deck.is_none() {
+                    queue_unseen.push_back(VocabItem {
+                        dataset: i,
+                        card: j,
+                        reverse: false,
+                        memorization_card: true,
+                    });
+                }
+
                 if let Some(limit) = limit {
                     // TODO: In theory it could happen that the limit is exceeded by 1
-                    if queue.len() + queue_reverse.len() >= limit {
+                    if queue_seen.len() + queue_reverse.len() >= limit {
                         break;
                     }
                 }
                 let add_to_queue =
                     use_all || !matches!(card.due_date, Some(date) if date > current_date);
                 if add_to_queue {
-                    queue.push_back(VocabItem {
+                    queue_seen.push_back(VocabItem {
                         dataset: i,
                         card: j,
                         reverse: false,
+                        memorization_card: false,
                     });
                 }
                 let add_to_queue_reverse =
@@ -65,18 +78,22 @@ impl VocaSession {
                         dataset: i,
                         card: j,
                         reverse: true,
+                        memorization_card: false,
                     });
                 }
             }
         }
 
-        for item in queue_reverse {
-            queue.push_back(item);
+        for item in queue_seen {
+            queue_unseen.push_back(item);
         }
-        let total_due = queue.len();
+        for item in queue_reverse {
+            queue_unseen.push_back(item);
+        }
+        let total_due = queue_unseen.len();
         VocaSession {
             datasets,
-            queue,
+            queue: queue_unseen,
             has_changes: false,
             total_due,
         }
@@ -103,6 +120,7 @@ impl VocaSession {
                     } else {
                         card.word_b.clone()
                     },
+                    show_answer: index.memorization_card,
                 })
         })
     }
@@ -121,7 +139,10 @@ impl VocaSession {
 
     pub fn skip_card(&mut self) {
         if let Some(index) = self.queue.pop_front() {
-            self.queue.push_back(index);
+            // In memorization mode, remove the card from the queue
+            if !index.memorization_card {
+                self.queue.push_back(index);
+            }
         }
     }
 
@@ -131,6 +152,11 @@ impl VocaSession {
         let Some(current_item) = self.queue.pop_front() else {
             return;
         };
+
+        // If in memorization mode, just remove the card from the queue
+        if current_item.memorization_card {
+            return;
+        }
 
         let deck_durations = &deck_config.deck_durations;
 

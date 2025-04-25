@@ -69,7 +69,7 @@ enum InputMode {
 
 struct Review {
     correct: bool,
-    correct_answer: String,
+    // correct_answer: String,
 }
 
 enum CurrentScreen {
@@ -201,15 +201,11 @@ impl App {
         let Some(current_task) = self.voca_session.current_task() else {
             return;
         };
-        let correct_answer = current_task.answer.clone();
         let answer = self.input.clone();
         let correct = current_task.is_correct(answer.as_str(), &self.config.validation);
         match &self.current_screen {
             CurrentScreen::Query => {
-                self.current_screen = CurrentScreen::Review(Review {
-                    correct,
-                    correct_answer,
-                });
+                self.current_screen = CurrentScreen::Review(Review { correct });
             }
             CurrentScreen::Review(review) if correct => {
                 self.next_card(review.correct);
@@ -384,12 +380,7 @@ impl App {
             progress,
         );
 
-        if let CurrentScreen::Review(Review {
-            correct,
-            correct_answer,
-            ..
-        }) = &self.current_screen
-        {
+        if let CurrentScreen::Review(Review { correct }) = &self.current_screen {
             let area = frame.area();
 
             let canvas = Canvas::default()
@@ -406,8 +397,13 @@ impl App {
                     });
                 });
             frame.render_widget(canvas, area);
+        }
+
+        if matches!(self.current_screen, CurrentScreen::Review(Review { .. }))
+            || current_card.show_answer
+        {
             frame.render_widget(
-                Paragraph::new(correct_answer.to_string())
+                Paragraph::new(current_card.answer.to_string())
                     .block(Block::bordered().title("Correct Answer")),
                 correct_answer_area,
             );
