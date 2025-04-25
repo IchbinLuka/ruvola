@@ -31,33 +31,29 @@ impl Vocab {
         }
     }
 
-    fn from_line(line: &str) -> Result<Vocab, std::io::Error> {
+    fn from_line(line: &str) -> Result<Vocab, VocaLineError> {
+        use VocaLineError::*;
+
         let mut parts = line.split('\t');
-        let word_a = parts
-            .next()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing word_a"))?
-            .to_string();
-        let word_b = parts
-            .next()
-            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing word_b"))?
-            .to_string();
+        let word_a = parts.next().ok_or(MissingWordA)?.to_string();
+        let word_b = parts.next().ok_or(MissingWordB)?.to_string();
         let (deck, due_date, deck_b, due_date_b) = match parts.next() {
             Some(deck) => {
-                let deck = deck.parse::<u8>().ok();
-                let date_str = parts
-                    .next()
-                    .ok_or_else(|| {
-                        std::io::Error::new(std::io::ErrorKind::InvalidData, "Missing due_date")
-                    })?
-                    .trim();
+                let deck = deck.parse::<u8>().map_err(|_| InvalidDeck)?;
+                let date_str = parts.next().ok_or(MissingDueDate)?;
                 let date = NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S")
-                    .expect("Failed to parse date");
-                let deck_b = parts.next().and_then(|d| d.parse::<u8>().ok());
-                let date_b = parts.next().map(|d| {
-                    NaiveDateTime::parse_from_str(d, "%Y-%m-%d %H:%M:%S")
-                        .expect("Failed to parse date")
-                });
-                (deck, Some(date), deck_b, date_b)
+                    .map_err(|_| InvalidDueDate)?;
+                let deck_b = parts
+                    .next()
+                    .ok_or(MissingDeck)?
+                    .parse::<u8>()
+                    .map_err(|_| InvalidDeck)?;
+                let date_b = NaiveDateTime::parse_from_str(
+                    parts.next().ok_or(MissingDueDate)?,
+                    "%Y-%m-%d %H:%M:%S",
+                )
+                .map_err(|_| InvalidDueDate)?;
+                (Some(deck), Some(date), Some(deck_b), Some(date_b))
             }
             None => (None, None, None, None),
         };
@@ -74,6 +70,40 @@ impl Vocab {
 }
 
 #[derive(Debug)]
+enum VocaLineError {
+    MissingWordA,
+    MissingWordB,
+    MissingDeck,
+    MissingDueDate,
+    InvalidDueDate,
+    InvalidDeck,
+}
+
+impl std::fmt::Display for VocaLineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VocaLineError::MissingWordA => write!(f, "Missing word A"),
+            VocaLineError::MissingWordB => write!(f, "Missing word B"),
+            VocaLineError::MissingDeck => write!(f, "Missing deck"),
+            VocaLineError::MissingDueDate => write!(f, "Missing due date"),
+            VocaLineError::InvalidDueDate => write!(f, "Invalid due date"),
+            VocaLineError::InvalidDeck => write!(f, "Invalid deck"),
+        }
+    }
+}
+impl std::error::Error for VocaLineError {}
+
+impl VocaLineError {
+    fn to_parse_error(&self, filename: &str, line: usize) -> VocaParseError {
+        VocaParseError::InvalidFormat {
+            filename: filename.into(),
+            line,
+            reason: self.to_string(),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct VocaCardDataset {
     pub cards: Vec<Vocab>,
     pub file_path: String,
@@ -83,17 +113,33 @@ pub struct VocaCardDataset {
 
 #[derive(Debug)]
 pub enum VocaParseError {
-    EmptyFile,
+    EmptyFile {
+        filename: String,
+    },
     IoError(std::io::Error),
-    InvalidFormat,
+    InvalidFormat {
+        filename: String,
+        line: usize,
+        reason: String,
+    },
 }
 
 impl std::fmt::Display for VocaParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            VocaParseError::EmptyFile => write!(f, "The file is empty"),
+            VocaParseError::EmptyFile { filename } => write!(f, "Empty file: {}", filename),
             VocaParseError::IoError(err) => write!(f, "IO error: {}", err),
-            VocaParseError::InvalidFormat => write!(f, "Invalid format"),
+            VocaParseError::InvalidFormat {
+                filename,
+                line,
+                reason,
+            } => {
+                write!(
+                    f,
+                    "Invalid format in file '{}', line {}: {}",
+                    filename, line, reason
+                )
+            }
         }
     }
 }
@@ -112,20 +158,31 @@ impl VocaCardDataset {
         let reader = std::io::BufReader::new(file);
         let mut cards = Vec::new();
         let mut lines = reader.lines();
-        let header = lines.next().ok_or(VocaParseError::EmptyFile)??;
+        let header = lines.next().ok_or(VocaParseError::EmptyFile {
+            filename: file_path.into(),
+        })??;
         let mut parts = header.split('\t');
         let lang_a = parts
             .next()
-            .ok_or(VocaParseError::InvalidFormat)?
+            .ok_or(VocaParseError::InvalidFormat {
+                filename: file_path.into(),
+                line: 1,
+                reason: "Invalid Header".into(),
+            })?
             .to_string();
         let lang_b = parts
             .next()
-            .ok_or(VocaParseError::InvalidFormat)?
+            .ok_or(VocaParseError::InvalidFormat {
+                filename: file_path.into(),
+                line: 1,
+                reason: "Expected second column".into(),
+            })?
             .to_string();
-        for line in lines {
+        for (i, line) in lines.enumerate() {
             let line = line?;
             if !line.trim().is_empty() {
-                let card = Vocab::from_line(&line)?;
+                let card =
+                    Vocab::from_line(&line).map_err(|e| e.to_parse_error(file_path, i + 2))?;
                 cards.push(card);
             }
         }
