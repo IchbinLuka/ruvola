@@ -6,7 +6,7 @@
 
 RuVoLA (**Ru**sty **Vo**cabulary **L**earning **A**pplication) is a TUI based application for learning vocabulary written in Rust. As opposed to flashcard programs like [vocage](https://github.com/proycon/vocage) or [anki](https://apps.ankiweb.net/), the user is here required to type the vocabularies similar to the [phase6](https://www.phase-6.de/) platform. 
 
-To ensure that words with a higher error rate are repeated more often, RuVoLA employs a system similar to vocage where the words are moved decks with each deck having a different presentation interval. 
+To ensure that words with a higher error rate are repeated more often, RuVoLA employs a system similar to vocage where the words are moved between decks with each deck having a different presentation interval. 
 
 ![Example usage of RuVoLA](assets/showcase.gif)
 
@@ -15,7 +15,8 @@ To ensure that words with a higher error rate are repeated more often, RuVoLA em
     - Here, however, the TSV files can only contain two columns
     - The learning progress is also directly stored in the TSV file, allowing you to store the vocabularies and learning progress in a version control system like git
 - Multiple vocabulary files can be loaded at once. This allows for grouping of vocabularies into different levels/domains/etc.
-- RuVoLA can be configured using a simple configuration file. This configuration will will automatically be created at `~/.config/vola/config.toml` (or other os-specific equivalent) the first time you run the program.
+- RuVoLA forces the user to type out the vocabulary to better memorize them.
+- RuVoLA can be configured using a simple configuration file (see below). 
 - Special character support: Some languages have special characters that are not supported by all keyboard layouts. RuVoLA allows you to define sets of special characters for each language.
 - Written in Rust
 
@@ -36,8 +37,27 @@ For a full list of parameters, run `ruvola -h`.
 > ruvola vocabs.tsv
 ```
 
-## Configuration file format
-This is an example configuration file, additionally providing special characters for german, italian and french. 
+## Keybindings
+| Key | Action |
+|------------|--------|
+| `e`        | Enter Edit Mode | 
+| `Enter`    | Submit the current buffer |
+| `w`        | Save and quit |
+| `Q`        | Quit without saving |
+| `a`        | Accept anyway (if answer was marked as wrong) |
+| `s`        | Skip the current card |
+| `Esc`      | Stop editing |
+| `Ctrl + Space` | Show all special characters (in edit mode) |
+| `Ctrl + <Key>` | Show special characters for the given key (in edit mode) | 
+
+## Configuration file
+RuVoLA allows customization using a configuration file. This file needs to be created manually. If the file does not exist, RuVoLA will use the default config. This configuration file should be placed in:
+- `$XDG_CONFIG_HOME/ruvola/config.toml` on Linux
+- `$HOME/Library/Application Support/ruvola/config.toml` on MacOS
+- `%APPDATA%/ruvola/config.toml` on Windows
+
+
+Below is an example configuration file, additionally providing special characters for german, italian and french. 
 
 ```toml
 [memorization]
