@@ -1,27 +1,52 @@
-# VOLE
-VOLE (**V**ocabulary **O**xidation **L**earning **E**nvironment) is a TUI based application for learning vocabulary written in Rust. As opposed to flashcard programs like [vocage](https://github.com/proycon/vocage) or [anki](https://apps.ankiweb.net/), the user is here required to type the vocabularies similar to the [phase6](https://www.phase-6.de/) platform. 
+<center>
+<img src="assets/logo.png" alt="RuVoLA Logo" width="150"/>
+<h1>RuVoLA</h1>
+</center>
+
+
+RuVoLA (**R**usty **Vo**cabulary **L**earning **A**pplication) is a TUI based application for learning vocabulary written in Rust. As opposed to flashcard programs like [vocage](https://github.com/proycon/vocage) or [anki](https://apps.ankiweb.net/), the user is here required to type the vocabularies similar to the [phase6](https://www.phase-6.de/) platform. 
 
 To ensure that words with a higher error rate are repeated more often, VOLE employs a system similar to vocage where the words are moved decks with each deck having a different presentation interval. 
+
+![Example usage of RuVoLA](assets/showcase.gif)
 
 ## Features
 - Similar to vocage, the data is stored in a simple plain-text tab-separated values format (TSV)
     - Here, however, the TSV files can only contain two columns
     - The learning progress is also directly stored in the TSV file, allowing you to store the vocabularies and learning progress in a version control system like git
 - Multiple vocabulary files can be loaded at once. This allows for grouping of vocabularies into different levels/domains/etc.
-- VOLE can be configured using a simple configuration file. This configuration will will automatically be created at `~/.config/vola/config.toml` the first time you run the program.
+- VOLE can be configured using a simple configuration file. This configuration will will automatically be created at `~/.config/vola/config.toml` (or other os-specific equivalent) the first time you run the program.
 - Special character support: Some languages have special characters that are not supported by all keyboard layouts. VOLE allows you to define sets of special characters for each language.
 - Written in Rust
 
-## Usage
-For a full list of parameters, run `vole -h`.
+## Installation
+1. Make sure you have the Rust toolchain installed. You can install it using [rustup](https://rustup.rs/).
+2. Clone the repository:
 ```bash
-> vole vocabs.tsv
+git clone https://github.com/IchbinLuka/ruvola.git
+```
+3. In the cloned directory, run:
+```bash
+cargo install --path .
+```
+
+## Usage
+For a full list of parameters, run `ruvola -h`.
+```bash
+> ruvola vocabs.tsv
 ```
 
 ## Configuration file format
 This is an example configuration file, additionally providing special characters for german, italian and french. 
 
 ```toml
+[memorization]
+# For vocabularies that have not been presented to the user yet, you
+# can enable a memorization round where both the query and answer are
+# shown.
+do_memorization_round = true
+memorization_reversed = false
+
 [validation]
 # The maximum edit distance for a word to be considered correct
 error_tolerance = 2
