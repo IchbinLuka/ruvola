@@ -1,7 +1,7 @@
-<center>
+<p align="center">
 <img src="assets/logo.png" alt="RuVoLA Logo" width="150"/>
-<h1>RuVoLA</h1>
-</center>
+<h1 align="center">RuVoLA</h1>
+</p>
 
 
 RuVoLA (**R**usty **Vo**cabulary **L**earning **A**pplication) is a TUI based application for learning vocabulary written in Rust. As opposed to flashcard programs like [vocage](https://github.com/proycon/vocage) or [anki](https://apps.ankiweb.net/), the user is here required to type the vocabularies similar to the [phase6](https://www.phase-6.de/) platform. 
