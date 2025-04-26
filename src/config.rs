@@ -17,7 +17,7 @@ pub struct AppConfig {
 impl AppConfig {
     pub fn load_from_config_file() -> Result<Self> {
         let config_path = get_system_config_dir()?;
-        let config_file = format!("{}/vocab_trainer/config.toml", config_path);
+        let config_file = format!("{}/ruvola/config.toml", config_path);
         Self::load_from_file(&config_file)
     }
 
@@ -34,8 +34,8 @@ impl AppConfig {
 
     pub fn save_to_file(&self) -> Result<()> {
         let config_path = get_system_config_dir()?;
-        let config_file = format!("{}/vocab_trainer/config.toml", config_path);
-        std::fs::create_dir_all(format!("{}/vocab_trainer", config_path))?;
+        let config_file = format!("{}/ruvola/config.toml", config_path);
+        std::fs::create_dir_all(format!("{}/ruvola", config_path))?;
         let mut file = std::fs::File::create(config_file)?;
         let serialized = toml::ser::to_string(self)?;
         file.write_all(serialized.as_bytes())?;
@@ -138,7 +138,7 @@ mod tests {
         assert!(fs::exists(get_system_config_dir().unwrap()).unwrap());
         let _ = AppConfig::load_from_config_file().unwrap(); // This will create the config file if it doesn't exist
         assert!(fs::exists(format!(
-            "{}/vocab_trainer/config.toml",
+            "{}/ruvola/config.toml",
             get_system_config_dir().unwrap()
         ))
         .unwrap());

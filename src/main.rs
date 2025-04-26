@@ -532,12 +532,13 @@ struct HelpWidget;
 
 impl HelpWidget {
     fn draw(&self, frame: &mut Frame) {
-        const KEYBINDINGS: [(&str, &str); 7] = [
+        const KEYBINDINGS: [(&str, &str); 8] = [
             ("Q", "Quit without saving"),
             ("w", "Save and quit"),
             ("a", "Accept anyway"),
             ("Esc", "Stop editing"),
-            ("Ctrl+Space", "Show special letters (in edit mode)"),
+            ("Ctrl+Space", "Show all special letters (in edit mode)"),
+            ("Ctrl+<Key>", "Show special letters for <Key> (in edit mode)"), 
             ("e", "Enter edit mode"),
             ("s", "Skip"),
         ];
@@ -570,37 +571,13 @@ impl HelpWidget {
                 .padding(Padding::uniform(1)),
         );
 
-        let [help_area] = Layout::horizontal([Constraint::Max(keys_width + desc_width + 3)])
+        let [help_area] = Layout::horizontal([Constraint::Max(keys_width + desc_width + 5)])
             .flex(Flex::Center)
             .areas(frame.area());
-        let [help_area] = Layout::vertical([Constraint::Max(KEYBINDINGS.len() as u16 + 2)])
+        let [help_area] = Layout::vertical([Constraint::Max(KEYBINDINGS.len() as u16 + 4)])
             .flex(Flex::Center)
             .areas(help_area);
         frame.render_widget(Clear, help_area);
         frame.render_widget(table, help_area);
-    }
-}
-
-impl Widget for HelpWidget {
-    fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
-    where
-        Self: Sized,
-    {
-        const KEYBINDINGS: [(&str, &str); 7] = [
-            ("Q", "Quit without saving"),
-            ("w", "Save and quit"),
-            ("a", "Accept anyway"),
-            ("Esc", "Stop editing"),
-            ("Ctrl+Space", "Show special letters (in edit mode)"),
-            ("e", "Enter edit mode"),
-            ("s", "Skip"),
-        ];
-
-        Clear.render(area, buf);
-        List::new(KEYBINDINGS.iter().map(|(key, desc)| {
-            Text::from(Line::from(vec![key.bold(), ": ".into(), (*desc).into()]))
-        }))
-        .block(Block::bordered().title("Keybindings"))
-        .render(area, buf);
     }
 }
