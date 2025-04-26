@@ -1,16 +1,13 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, io::Write};
+use std::collections::HashMap;
 
 #[derive(Deserialize, Serialize, Debug, Default, PartialEq)]
+#[serde(default)]
 pub struct AppConfig {
-    #[serde(default)]
     pub memorization: MemorizationConfig,
-    #[serde(default)]
     pub validation: ValidationConfig,
-    #[serde(default)]
     pub deck_config: DeckConfig,
-    #[serde(default)]
     pub special_letters: SpecialLetters,
 }
 
@@ -18,32 +15,20 @@ impl AppConfig {
     pub fn load_from_config_file() -> Result<Self> {
         let config_path = get_system_config_dir()?;
         let config_file = format!("{}/ruvola/config.toml", config_path);
-        Self::load_from_file(&config_file)
+        if std::fs::exists(&config_file)? {
+            Self::load_from_file(&config_file)
+        } else {
+            Ok(Self::default())
+        }
     }
 
     pub fn load_from_file(file_path: &str) -> Result<Self> {
-        if !std::fs::exists(file_path)? {
-            let default_config = AppConfig::default();
-            default_config.save_to_file()?;
-            return Ok(default_config);
-        }
-
-        let config: AppConfig = toml::de::from_str(&std::fs::read_to_string(file_path)?)?;
-        Ok(config)
-    }
-
-    pub fn save_to_file(&self) -> Result<()> {
-        let config_path = get_system_config_dir()?;
-        let config_file = format!("{}/ruvola/config.toml", config_path);
-        std::fs::create_dir_all(format!("{}/ruvola", config_path))?;
-        let mut file = std::fs::File::create(config_file)?;
-        let serialized = toml::ser::to_string(self)?;
-        file.write_all(serialized.as_bytes())?;
-        Ok(())
+        Ok(toml::de::from_str(&std::fs::read_to_string(file_path)?)?)
     }
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[serde(default)]
 pub struct MemorizationConfig {
     pub do_memorization_round: bool,
     pub memorization_reversed: bool,
@@ -59,6 +44,7 @@ impl Default for MemorizationConfig {
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[serde(default)]
 pub struct ValidationConfig {
     pub error_tolerance: usize,
     pub tolerance_min_length: usize,
@@ -74,6 +60,7 @@ impl Default for ValidationConfig {
 }
 
 #[derive(Deserialize, Serialize, Debug, Default, PartialEq)]
+#[serde(default)]
 pub struct SpecialLetters(pub HashMap<String, Vec<SpecialLettersConfig>>);
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
@@ -83,6 +70,7 @@ pub struct SpecialLettersConfig {
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[serde(default)]
 pub struct DeckConfig {
     pub deck_durations: Vec<u32>,
 }
@@ -134,13 +122,8 @@ mod tests {
     }
 
     #[test]
-    fn config_file_creation() {
+    fn system_config_dir() {
         assert!(fs::exists(get_system_config_dir().unwrap()).unwrap());
-        let _ = AppConfig::load_from_config_file().unwrap(); // This will create the config file if it doesn't exist
-        assert!(fs::exists(format!(
-            "{}/ruvola/config.toml",
-            get_system_config_dir().unwrap()
-        ))
-        .unwrap());
+        assert!(fs::metadata(get_system_config_dir().unwrap()).unwrap().is_dir());
     }
 }
