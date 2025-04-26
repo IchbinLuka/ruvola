@@ -4,9 +4,9 @@
 </p>
 
 
-RuVoLA (**R**usty **Vo**cabulary **L**earning **A**pplication) is a TUI based application for learning vocabulary written in Rust. As opposed to flashcard programs like [vocage](https://github.com/proycon/vocage) or [anki](https://apps.ankiweb.net/), the user is here required to type the vocabularies similar to the [phase6](https://www.phase-6.de/) platform. 
+RuVoLA (**Ru**sty **Vo**cabulary **L**earning **A**pplication) is a TUI based application for learning vocabulary written in Rust. As opposed to flashcard programs like [vocage](https://github.com/proycon/vocage) or [anki](https://apps.ankiweb.net/), the user is here required to type the vocabularies similar to the [phase6](https://www.phase-6.de/) platform. 
 
-To ensure that words with a higher error rate are repeated more often, VOLE employs a system similar to vocage where the words are moved decks with each deck having a different presentation interval. 
+To ensure that words with a higher error rate are repeated more often, RuVoLA employs a system similar to vocage where the words are moved decks with each deck having a different presentation interval. 
 
 ![Example usage of RuVoLA](assets/showcase.gif)
 
@@ -15,8 +15,8 @@ To ensure that words with a higher error rate are repeated more often, VOLE empl
     - Here, however, the TSV files can only contain two columns
     - The learning progress is also directly stored in the TSV file, allowing you to store the vocabularies and learning progress in a version control system like git
 - Multiple vocabulary files can be loaded at once. This allows for grouping of vocabularies into different levels/domains/etc.
-- VOLE can be configured using a simple configuration file. This configuration will will automatically be created at `~/.config/vola/config.toml` (or other os-specific equivalent) the first time you run the program.
-- Special character support: Some languages have special characters that are not supported by all keyboard layouts. VOLE allows you to define sets of special characters for each language.
+- RuVoLA can be configured using a simple configuration file. This configuration will will automatically be created at `~/.config/vola/config.toml` (or other os-specific equivalent) the first time you run the program.
+- Special character support: Some languages have special characters that are not supported by all keyboard layouts. RuVoLA allows you to define sets of special characters for each language.
 - Written in Rust
 
 ## Installation
