@@ -1,2 +1,2 @@
-pub(crate) mod voca_card;
+mod voca_card;
 pub(crate) mod voca_session;

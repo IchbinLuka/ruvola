@@ -1,34 +1,59 @@
 use std::{error::Error, io::BufRead};
 
-use chrono::NaiveDateTime;
+use chrono::{DateTime, NaiveDateTime};
 
 #[derive(Debug)]
 pub struct Vocab {
     pub word_a: String,
     pub word_b: String,
-    pub due_date: Option<NaiveDateTime>,
-    pub due_date_reverse: Option<NaiveDateTime>,
-    pub deck: Option<u8>,
-    pub deck_reverse: Option<u8>,
+    pub metadata: Option<VocabMetadata>,
+}
+
+#[derive(Debug, Clone)]
+pub struct VocabMetadata {
+    pub due_date: NaiveDateTime,
+    pub deck: u8,
+    pub due_date_reverse: NaiveDateTime,
+    pub deck_reverse: u8,
+    // pub seen_before: bool,
+}
+
+impl Default for VocabMetadata {
+    fn default() -> Self {
+        VocabMetadata {
+            due_date: DateTime::UNIX_EPOCH.naive_utc(),
+            deck: 0,
+            due_date_reverse: DateTime::UNIX_EPOCH.naive_utc(),
+            deck_reverse: 0,
+        }
+    }
 }
 
 impl Vocab {
     pub fn update_metadata(&mut self, deck: u8, due_date: NaiveDateTime, reverse: bool) {
         if reverse {
-            self.deck_reverse = Some(deck);
-            self.due_date_reverse = Some(due_date);
+            self.metadata = Some(VocabMetadata {
+                deck_reverse: deck,
+                due_date_reverse: due_date,
+                ..self.metadata.clone().unwrap_or_default()
+            });
         } else {
-            self.deck = Some(deck);
-            self.due_date = Some(due_date);
+            self.metadata = Some(VocabMetadata {
+                deck,
+                due_date,
+                ..self.metadata.clone().unwrap_or_default()
+            });
         }
     }
 
     pub fn get_deck(&self, reverse: bool) -> Option<u8> {
-        if reverse {
-            self.deck_reverse
-        } else {
-            self.deck
-        }
+        self.metadata.as_ref().map(|metadata| {
+            if reverse {
+                metadata.deck_reverse
+            } else {
+                metadata.deck
+            }
+        })
     }
 
     fn from_line(line: &str) -> Result<Vocab, VocaLineError> {
@@ -37,7 +62,7 @@ impl Vocab {
         let mut parts = line.split('\t');
         let word_a = parts.next().ok_or(MissingWordA)?.to_string();
         let word_b = parts.next().ok_or(MissingWordB)?.to_string();
-        let (deck, due_date, deck_b, due_date_b) = match parts.next() {
+        let metadata = match parts.next() {
             Some(deck) => {
                 let deck = deck.parse::<u8>().map_err(|_| InvalidDeck)?;
                 let date_str = parts.next().ok_or(MissingDueDate)?;
@@ -53,18 +78,21 @@ impl Vocab {
                     "%Y-%m-%d %H:%M:%S",
                 )
                 .map_err(|_| InvalidDueDate)?;
-                (Some(deck), Some(date), Some(deck_b), Some(date_b))
+                Some(VocabMetadata {
+                    deck,
+                    due_date: date,
+                    deck_reverse: deck_b,
+                    due_date_reverse: date_b,
+                })
             }
-            None => (None, None, None, None),
+
+            None => None,
         };
 
         Ok(Vocab {
             word_a,
             word_b,
-            due_date,
-            deck,
-            due_date_reverse: due_date_b,
-            deck_reverse: deck_b,
+            metadata,
         })
     }
 }
@@ -200,24 +228,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_voca_card() {
+    fn parse_card() {
         let line = "hello\tworld\t1\t2023-10-01 12:00:00\t2\t2024-10-01 13:00:00";
         let card = Vocab::from_line(line).unwrap();
         assert_eq!(card.word_a, "hello");
         assert_eq!(card.word_b, "world");
-        assert_eq!(card.deck, Some(1));
+        assert_eq!(card.metadata.as_ref().unwrap().deck, 1);
         assert_eq!(
-            card.due_date,
-            Some(
-                NaiveDateTime::parse_from_str("2023-10-01 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
-            )
+            card.metadata.as_ref().unwrap().due_date,
+            NaiveDateTime::parse_from_str("2023-10-01 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
         );
-        assert_eq!(card.deck_reverse, Some(2));
+        assert_eq!(card.metadata.as_ref().unwrap().deck_reverse, 2);
         assert_eq!(
-            card.due_date_reverse,
-            Some(
-                NaiveDateTime::parse_from_str("2024-10-01 13:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
-            )
+            card.metadata.as_ref().unwrap().due_date_reverse,
+            NaiveDateTime::parse_from_str("2024-10-01 13:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
         );
     }
 }

@@ -1,9 +1,13 @@
+[memorization]
+do_memorization_round = true
+memorization_reversed = false
+
 [validation]
 error_tolerance = 2
 tolerance_min_length = 5
 
 [deck_config]
-deck_durations = [0, 1, 7, 14, 30, 60, 90]
+deck_durations = [0, 1, 7, 14, 30, 60, 90, 180, 365]
 
 [special_letters]
 de = [

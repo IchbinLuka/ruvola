@@ -22,9 +22,9 @@ mod model;
 fn main() -> Result<()> {
     let args = Arguments::parse();
     cli_log::init_cli_log!();
-    // color_eyre::install()?;
-    let config = config::AppConfig::load_from_file()?;
-    let session = VocaSession::from_files(&args.file_paths, args.all, args.limit)?;
+    let config = config::AppConfig::load_from_config_file()?;
+    let session =
+        VocaSession::from_files(&args.file_paths, args.all, args.limit, &config.memorization)?;
     let mut terminal = ratatui::init();
     // Set cursor style to steady bar
     execute!(
@@ -40,7 +40,8 @@ fn main() -> Result<()> {
 #[derive(clap::Parser, Debug)]
 #[clap(name = "vocab_trainer", version, about)]
 struct Arguments {
-    /// Limit for the number of cards to show
+    /// Limit for the number of distinct cards to show. Note that the actual number of tasks presented 
+    /// may be higher since both directions are tested and a potential memorization round. 
     #[arg(short, long)]
     limit: Option<usize>,
     /// Show all cards, even if they are not due

@@ -2,9 +2,9 @@ use std::collections::VecDeque;
 
 use chrono::Duration;
 
-use crate::config::{DeckConfig, ValidationConfig};
+use crate::config::{DeckConfig, MemorizationConfig, ValidationConfig};
 
-use super::voca_card::{VocaCardDataset, VocaParseError};
+use super::voca_card::{VocaCardDataset, VocaParseError, VocabMetadata};
 use std::io::Write;
 
 pub struct VocabTask {
@@ -38,31 +38,38 @@ pub struct VocaSession {
 }
 
 impl VocaSession {
-    fn new(datasets: Vec<VocaCardDataset>, use_all: bool, limit: Option<usize>) -> Self {
+    fn new(
+        datasets: Vec<VocaCardDataset>,
+        use_all: bool,
+        limit: Option<usize>,
+        memorization_config: &MemorizationConfig,
+    ) -> Self {
         let mut queue_seen = VecDeque::new();
         let mut queue_reverse = VecDeque::new();
         let mut queue_unseen = VecDeque::new();
         // let mut queue_reverse = VecDeque::new();
         let current_date = chrono::Local::now().naive_utc();
+        let mut num_cards = 0;
         for (i, dataset) in datasets.iter().enumerate() {
             for (j, card) in dataset.cards.iter().enumerate() {
-                if card.deck.is_none() {
+                if let Some(limit) = limit {
+                    if num_cards >= limit {
+                        break;
+                    }
+                }
+
+                if card.metadata.is_none() && memorization_config.do_memorization_round {
                     queue_unseen.push_back(VocabItem {
                         dataset: i,
                         card: j,
-                        reverse: false,
+                        reverse: memorization_config.memorization_reversed,
                         memorization_card: true,
                     });
                 }
 
-                if let Some(limit) = limit {
-                    // TODO: In theory it could happen that the limit is exceeded by 1
-                    if queue_seen.len() + queue_reverse.len() >= limit {
-                        break;
-                    }
-                }
-                let add_to_queue =
-                    use_all || !matches!(card.due_date, Some(date) if date > current_date);
+                
+                let add_to_queue = use_all
+                    || !matches!(&card.metadata, Some(metadata) if metadata.due_date > current_date);
                 if add_to_queue {
                     queue_seen.push_back(VocabItem {
                         dataset: i,
@@ -71,8 +78,8 @@ impl VocaSession {
                         memorization_card: false,
                     });
                 }
-                let add_to_queue_reverse =
-                    use_all || !matches!(card.due_date_reverse, Some(date) if date > current_date);
+                let add_to_queue_reverse = use_all
+                    || !matches!(&card.metadata, Some(metadata) if metadata.due_date_reverse > current_date);
                 if add_to_queue_reverse {
                     queue_reverse.push_back(VocabItem {
                         dataset: i,
@@ -80,6 +87,9 @@ impl VocaSession {
                         reverse: true,
                         memorization_card: false,
                     });
+                }
+                if add_to_queue || add_to_queue_reverse {
+                    num_cards += 1;
                 }
             }
         }
@@ -142,6 +152,9 @@ impl VocaSession {
             // In memorization mode, remove the card from the queue
             if !index.memorization_card {
                 self.queue.push_back(index);
+            } else {
+                self.datasets[index.dataset].cards[index.card].metadata = Some(VocabMetadata::default());
+                self.has_changes = true;
             }
         }
     }
@@ -153,15 +166,17 @@ impl VocaSession {
             return;
         };
 
-        // If in memorization mode, just remove the card from the queue
-        if current_item.memorization_card {
-            return;
-        }
-
         let deck_durations = &deck_config.deck_durations;
 
         let card_mut = &mut self.datasets[current_item.dataset].cards[current_item.card];
         let current_deck = card_mut.get_deck(current_item.reverse).unwrap_or(0);
+
+        // If in memorization mode, just remove the card from the queue
+        if current_item.memorization_card {
+            card_mut.metadata = Some(VocabMetadata::default());
+            self.has_changes = true;
+            return;
+        }
 
         if answer_correct {
             let new_deck = (current_deck + 1).min(deck_durations.len() as u8 - 1);
@@ -193,25 +208,23 @@ impl VocaSession {
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
-        let current_date = chrono::Local::now().naive_utc();
         for dataset in &self.datasets {
             let file_path = &dataset.file_path;
             let mut file = std::fs::File::create(file_path)?;
             writeln!(file, "{}\t{}", dataset.lang_a, dataset.lang_b)?;
             for card in &dataset.cards {
-                let line = format!(
-                    "{}\t{}\t{}\t{}\t{}\t{}",
-                    card.word_a,
-                    card.word_b,
-                    card.deck.unwrap_or(0),
-                    card.due_date
-                        .unwrap_or(current_date)
-                        .format("%Y-%m-%d %H:%M:%S"),
-                    card.deck_reverse.unwrap_or(0),
-                    card.due_date_reverse
-                        .unwrap_or(current_date)
-                        .format("%Y-%m-%d %H:%M:%S")
-                );
+                let line = match card.metadata {
+                    Some(ref metadata) => format!(
+                        "{}\t{}\t{}\t{}\t{}\t{}",
+                        card.word_a,
+                        card.word_b,
+                        metadata.deck,
+                        metadata.due_date.format("%Y-%m-%d %H:%M:%S"),
+                        metadata.deck_reverse,
+                        metadata.due_date_reverse.format("%Y-%m-%d %H:%M:%S")
+                    ),
+                    None => format!("{}\t{}", card.word_a, card.word_b),
+                };
                 writeln!(file, "{}", line)?;
             }
         }
@@ -222,11 +235,17 @@ impl VocaSession {
         file_paths: &[String],
         use_all: bool,
         limit: Option<usize>,
+        memorization_config: &MemorizationConfig,
     ) -> Result<Self, VocaParseError> {
         let datasets = file_paths
             .iter()
             .map(|file_path| VocaCardDataset::from_file(file_path))
             .collect::<Result<Vec<_>, VocaParseError>>()?;
-        Ok(VocaSession::new(datasets, use_all, limit))
+        Ok(VocaSession::new(
+            datasets,
+            use_all,
+            limit,
+            memorization_config,
+        ))
     }
 }
