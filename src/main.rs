@@ -58,9 +58,8 @@ struct App {
     input_mode: InputMode,
     voca_session: VocaSession,
     current_screen: CurrentScreen,
-    special_letters_popup: Option<SpecialLettersPopup>,
+    popup: Option<Box<dyn Popup>>,
     config: config::AppConfig,
-    show_help: bool,
 }
 
 enum InputMode {
@@ -91,8 +90,7 @@ impl App {
             input_mode: InputMode::Normal,
             voca_session: session,
             current_screen: CurrentScreen::Query,
-            special_letters_popup: None,
-            show_help: false,
+            popup: None,
             config,
         }
     }
@@ -131,7 +129,7 @@ impl App {
                         letters: s.special.to_vec(),
                     }),
             };
-            self.special_letters_popup = popup;
+            self.popup = popup.map(|p| Box::new(p) as Box<dyn Popup>);
         } else {
             let index = self.byte_index();
             self.input.insert(index, c);
@@ -257,7 +255,7 @@ impl App {
                     self.voca_session.skip_card();
                 }
                 KeyCode::Char('h') => {
-                    self.show_help = !self.show_help;
+                    self.popup = Some(Box::new(HelpWidget));
                 }
                 _ => {}
             },
@@ -278,25 +276,24 @@ impl App {
     fn run(mut self, mut terminal: DefaultTerminal) -> Result<()> {
         loop {
             terminal.draw(|frame| self.draw(frame))?;
-
-            if let Some(popup) = &mut self.special_letters_popup {
-                let result = popup.handle_events();
+            let event = event::read()?;
+            if let Some(popup) = &mut self.popup {
+                let result = popup.handle_events(event);
                 match result {
-                    Ok(SpecialLettersEventResult::Insert(s)) => {
+                    PopupEventResult::Insert(s) => {
                         self.input.insert_str(self.byte_index(), &s);
-                        self.special_letters_popup = None;
+                        self.popup = None;
                         self.cursor_pos = self.clamp_cursor(self.cursor_pos + s.len());
                     }
-                    Ok(SpecialLettersEventResult::Cancel) => {
-                        self.special_letters_popup = None;
+                    PopupEventResult::Cancel => {
+                        self.popup = None;
                     }
-                    Ok(SpecialLettersEventResult::Ignore) => {}
-                    Err(_) => {}
+                    PopupEventResult::Ignore => {}
                 }
                 continue;
             }
 
-            if let Event::Key(key) = event::read()? {
+            if let Event::Key(key) = event {
                 match self.handle_key_events(key) {
                     KeyHandleResult::Quit { save } => {
                         if save {
@@ -425,33 +422,36 @@ impl App {
             frame.render_widget(Block::bordered(), correct_answer_area);
         }
 
-        if let Some(popup) = &self.special_letters_popup {
+        if let Some(popup) = &self.popup {
             popup.draw(frame);
         }
-        if self.show_help {
-            HelpWidget.draw(frame);
-        }
     }
+}
+
+
+trait Popup {
+    fn handle_events(&self, event: Event) -> PopupEventResult;
+    fn draw(&self, frame: &mut Frame);
 }
 
 struct SpecialLettersPopup {
     letters: Vec<String>,
 }
 
-enum SpecialLettersEventResult {
+enum PopupEventResult {
     Insert(String),
     Cancel,
     Ignore,
 }
 
-impl SpecialLettersPopup {
-    fn handle_events(&self) -> Result<SpecialLettersEventResult> {
-        const IGNORE: Result<SpecialLettersEventResult> = Ok(SpecialLettersEventResult::Ignore);
-        let Event::Key(key) = event::read()? else {
+impl Popup for SpecialLettersPopup {
+    fn handle_events(&self, event: Event) -> PopupEventResult {
+        const IGNORE: PopupEventResult = PopupEventResult::Ignore;
+        let Event::Key(key) = event else {
             return IGNORE;
         };
         if let KeyCode::Esc = key.code {
-            return Ok(SpecialLettersEventResult::Cancel);
+            return PopupEventResult::Cancel;
         }
         let KeyCode::Char(ch) = key.code else {
             return IGNORE;
@@ -464,9 +464,9 @@ impl SpecialLettersPopup {
         if digit >= self.letters.len() as i32 || digit < 0 {
             return IGNORE;
         }
-        Ok(SpecialLettersEventResult::Insert(
+        PopupEventResult::Insert(
             self.letters[digit as usize].clone(),
-        ))
+        )
     }
 
     fn draw(&self, frame: &mut Frame) {
@@ -509,6 +509,8 @@ struct NoCardsLeftScreen {
 }
 
 impl Widget for NoCardsLeftScreen {
+
+    
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,
@@ -543,7 +545,17 @@ impl Widget for NoCardsLeftScreen {
 
 struct HelpWidget;
 
-impl HelpWidget {
+impl Popup for HelpWidget {
+    fn handle_events(&self, event: Event) -> PopupEventResult {
+        let Event::Key(key) = event else {
+            return PopupEventResult::Ignore;
+        };
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('h') => PopupEventResult::Cancel,
+            _ => PopupEventResult::Ignore,
+        }
+    }
+
     fn draw(&self, frame: &mut Frame) {
         const KEYBINDINGS: [(&str, &str); 9] = [
             ("Q", "Quit without saving"),
