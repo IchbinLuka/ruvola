@@ -245,6 +245,13 @@ impl App {
                         }
                     }
                 }
+                KeyCode::Char('r') => {
+                    if let CurrentScreen::Review(review) = &self.current_screen {
+                        if review.correct {
+                            self.next_card(false);
+                        }
+                    }
+                }
                 KeyCode::Char('s') => {
                     self.reset_input();
                     self.voca_session.skip_card();
@@ -329,13 +336,19 @@ impl App {
 
         let [vocab_prompt_area, input_area, correct_answer_area] = horizontal.areas(prompt_area);
 
-        let is_review = matches!(self.current_screen, CurrentScreen::Review(Review { correct, .. }) if !correct);
-
         let msg = match self.input_mode {
-            InputMode::Normal if is_review => {
-                vec!["Press ".into(), "a".bold(), " to accept anyway".into()]
+            InputMode::Normal => {
+                match self.current_screen {
+                    CurrentScreen::Review(Review { correct }) => {
+                        if correct {
+                            vec!["Press ".into(), "r".bold(), " to reject anyway".into()]
+                        } else {
+                            vec!["Press ".into(), "a".bold(), " to accept anyway".into()]
+                        }
+                    }
+                    _ => vec!["Press ".into(), "h".bold(), " to show keybinds".into()]
+                }
             }
-            InputMode::Normal => vec!["Press ".into(), "h".bold(), " to show keybinds".into()],
             InputMode::Editing => vec![
                 "Press ".into(),
                 "Esc".bold(),
@@ -532,10 +545,11 @@ struct HelpWidget;
 
 impl HelpWidget {
     fn draw(&self, frame: &mut Frame) {
-        const KEYBINDINGS: [(&str, &str); 8] = [
+        const KEYBINDINGS: [(&str, &str); 9] = [
             ("Q", "Quit without saving"),
             ("w", "Save and quit"),
             ("a", "Accept anyway"),
+            ("r", "Reject anyway"),
             ("Esc", "Stop editing"),
             ("Ctrl+Space", "Show all special letters (in edit mode)"),
             ("Ctrl+<Key>", "Show special letters for <Key> (in edit mode)"), 
