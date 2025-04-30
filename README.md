@@ -74,8 +74,10 @@ error_tolerance = 2
 tolerance_min_length = 5
 
 [deck_config]
-# The interval of each deck in days
-deck_durations = [0, 1, 7, 14, 30, 60, 90]
+# The interval of each deck. Must be either a number, representing the 
+# duration in days or a string in the format "(<number><unit>)*" 
+# (e.g. "1d", "1d2h3m5s")
+deck_intervals = [0, "12h", 1, 7, 14, 30, 60, 90, 180, 365]
 
 [special_letters]
 de = [

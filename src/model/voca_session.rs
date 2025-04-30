@@ -1,7 +1,5 @@
 use std::collections::VecDeque;
 
-use chrono::Duration;
-
 use crate::config::{DeckConfig, MemorizationConfig, ValidationConfig};
 
 use super::voca_card::{VocaCardDataset, VocaParseError, VocabMetadata};
@@ -166,7 +164,7 @@ impl VocaSession {
             return;
         };
 
-        let deck_durations = &deck_config.deck_durations;
+        let deck_durations = &deck_config.deck_intervals;
 
         let card_mut = &mut self.datasets[current_item.dataset].cards[current_item.card];
         let current_deck = card_mut.get_deck(current_item.reverse).unwrap_or(0);
@@ -182,14 +180,14 @@ impl VocaSession {
             let new_deck = (current_deck + 1).min(deck_durations.len() as u8 - 1);
             card_mut.update_metadata(
                 new_deck,
-                current_date + Duration::days(deck_durations[new_deck as usize] as i64),
+                current_date + deck_durations[new_deck as usize].0,
                 current_item.reverse,
             );
         } else {
             let new_deck = (current_deck as i16 - 1).max(0) as u8;
             card_mut.update_metadata(
                 new_deck,
-                current_date + Duration::days(deck_durations[new_deck as usize] as i64),
+                current_date + deck_durations[new_deck as usize].0,
                 current_item.reverse,
             );
             self.queue.push_back(current_item);

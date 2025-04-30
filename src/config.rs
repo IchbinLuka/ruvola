@@ -1,9 +1,10 @@
 use anyhow::Result;
+use chrono::Duration;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Deserialize, Serialize, Debug, Default, PartialEq)]
-#[serde(default)]
+#[derive(Deserialize, Debug, Default, PartialEq)]
+#[serde(default, deny_unknown_fields)]
 pub struct AppConfig {
     pub memorization: MemorizationConfig,
     pub validation: ValidationConfig,
@@ -28,7 +29,7 @@ impl AppConfig {
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct MemorizationConfig {
     pub do_memorization_round: bool,
     pub memorization_reversed: bool,
@@ -44,7 +45,7 @@ impl Default for MemorizationConfig {
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct ValidationConfig {
     pub error_tolerance: usize,
     pub tolerance_min_length: usize,
@@ -60,7 +61,7 @@ impl Default for ValidationConfig {
 }
 
 #[derive(Deserialize, Serialize, Debug, Default, PartialEq)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct SpecialLetters(pub HashMap<String, Vec<SpecialLettersConfig>>);
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
@@ -69,17 +70,97 @@ pub struct SpecialLettersConfig {
     pub special: Vec<String>,
 }
 
-#[derive(Deserialize, Serialize, Debug, PartialEq)]
-#[serde(default)]
+#[derive(Deserialize, Debug, PartialEq)]
+#[serde(default, deny_unknown_fields)]
 pub struct DeckConfig {
-    pub deck_durations: Vec<u32>,
+    #[serde(alias = "deck_durations")]
+    pub deck_intervals: Vec<DeckInverval>,
 }
 
 impl Default for DeckConfig {
     fn default() -> Self {
         Self {
-            deck_durations: vec![0, 1, 7, 14, 30, 60, 90, 180, 365],
+            deck_intervals: [0, 1, 7, 14, 30, 60, 90, 180, 365]
+                .iter()
+                .map(|&days| DeckInverval(Duration::days(days)))
+                .collect(),
         }
+    }
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+#[serde(try_from = "DeckIntervalSer")]
+pub struct DeckInverval(pub Duration);
+
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[serde(untagged)]
+enum DeckIntervalSer {
+    Days(u32),
+    Complex(String),
+}
+
+#[derive(Debug)]
+enum IntervalParseError {
+    InvalidFormat,
+    InvalidNumber,
+    InvalidUnit,
+    ExpectedDigit,
+}
+impl std::fmt::Display for IntervalParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            IntervalParseError::InvalidFormat => write!(f, "Invalid format"),
+            IntervalParseError::InvalidNumber => write!(f, "Invalid number"),
+            IntervalParseError::InvalidUnit => write!(f, "Invalid unit"),
+            IntervalParseError::ExpectedDigit => write!(f, "Expected digit"),
+        }
+    }
+}
+impl std::error::Error for IntervalParseError {}
+
+impl TryFrom<DeckIntervalSer> for DeckInverval {
+    type Error = IntervalParseError;
+
+    fn try_from(value: DeckIntervalSer) -> std::result::Result<Self, Self::Error> {
+        match value {
+            DeckIntervalSer::Days(days) => Ok(DeckInverval(Duration::days(days as i64))),
+            DeckIntervalSer::Complex(complex) => {
+                let duration = parse_complex_duration(&complex)?;
+                Ok(DeckInverval(duration))
+            }
+        }
+    }
+}
+
+fn parse_complex_duration(complex: &str) -> Result<Duration, IntervalParseError> {
+    let mut current_duration = Duration::zero();
+    let mut current_number = Vec::new();
+    for c in complex.chars() {
+        if c.is_ascii_digit() {
+            current_number.push(c);
+            continue;
+        }
+        if current_number.is_empty() {
+            return Err(IntervalParseError::ExpectedDigit);
+        }
+        let total_number: u32 = current_number
+            .iter()
+            .collect::<String>()
+            .parse()
+            .map_err(|_| IntervalParseError::InvalidNumber)?;
+        current_duration += match c {
+            'd' => Duration::days(total_number as i64),
+            'h' => Duration::hours(total_number as i64),
+            'm' => Duration::minutes(total_number as i64),
+            's' => Duration::seconds(total_number as i64),
+            _ => return Err(IntervalParseError::InvalidUnit),
+        };
+        current_number.clear();
+    }
+    if current_number.is_empty() {
+        Ok(current_duration)
+    } else {
+        Err(IntervalParseError::InvalidFormat)
     }
 }
 
@@ -116,10 +197,6 @@ mod tests {
         assert_eq!(config.memorization.memorization_reversed, false);
         assert_eq!(config.validation.error_tolerance, 2);
         assert_eq!(config.validation.tolerance_min_length, 5);
-        assert_eq!(
-            config.deck_config.deck_durations,
-            vec![0, 1, 7, 14, 30, 60, 90, 180, 365]
-        );
         assert_eq!(config.special_letters.0.len(), 3);
     }
 
@@ -131,5 +208,31 @@ mod tests {
                 .unwrap()
                 .is_dir()
         );
+    }
+
+    #[test]
+    fn parse_complex_duration_test() {
+        let duration = parse_complex_duration("10d21h3m4s").unwrap();
+        assert_eq!(
+            duration,
+            Duration::days(10) + Duration::hours(21) + Duration::minutes(3) + Duration::seconds(4)
+        );
+        let duration = parse_complex_duration("1d").unwrap();
+        assert_eq!(duration, Duration::days(1));
+        let duration = parse_complex_duration("2h").unwrap();
+        assert_eq!(duration, Duration::hours(2));
+        let duration = parse_complex_duration("3m").unwrap();
+        assert_eq!(duration, Duration::minutes(3));
+        let duration = parse_complex_duration("4s").unwrap();
+        assert_eq!(duration, Duration::seconds(4));
+        let duration = parse_complex_duration("").unwrap();
+        assert_eq!(duration, Duration::zero());
+
+        let invalid = parse_complex_duration("1dhm4s");
+        assert!(invalid.is_err());
+        let invalid = parse_complex_duration("1d2h3m4");
+        assert!(invalid.is_err());
+        let invalid = parse_complex_duration("1d2h3m4x");
+        assert!(invalid.is_err());
     }
 }

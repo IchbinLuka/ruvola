@@ -7,7 +7,7 @@ error_tolerance = 2
 tolerance_min_length = 5
 
 [deck_config]
-deck_durations = [0, 1, 7, 14, 30, 60, 90, 180, 365]
+deck_intervals = [0, "12h", 1, 7, 14, 30, 60, 90, 180, 365]
 
 [special_letters]
 de = [
