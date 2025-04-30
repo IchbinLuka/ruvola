@@ -57,27 +57,27 @@ impl Vocab {
     }
 
     fn from_line(line: &str) -> Result<Vocab, VocaLineError> {
-        use VocaLineError::*;
+        use VocaLineError as VE;
 
         let mut parts = line.split('\t');
-        let word_a = parts.next().ok_or(MissingWordA)?.to_string();
-        let word_b = parts.next().ok_or(MissingWordB)?.to_string();
+        let word_a = parts.next().ok_or(VE::MissingWordA)?.to_string();
+        let word_b = parts.next().ok_or(VE::MissingWordB)?.to_string();
         let metadata = match parts.next() {
             Some(deck) => {
-                let deck = deck.parse::<u8>().map_err(|_| InvalidDeck)?;
-                let date_str = parts.next().ok_or(MissingDueDate)?;
+                let deck = deck.parse::<u8>().map_err(|_| VE::InvalidDeck)?;
+                let date_str = parts.next().ok_or(VE::MissingDueDate)?;
                 let date = NaiveDateTime::parse_from_str(date_str, "%Y-%m-%d %H:%M:%S")
-                    .map_err(|_| InvalidDueDate)?;
+                    .map_err(|_| VE::InvalidDueDate)?;
                 let deck_b = parts
                     .next()
-                    .ok_or(MissingDeck)?
+                    .ok_or(VE::MissingDeck)?
                     .parse::<u8>()
-                    .map_err(|_| InvalidDeck)?;
+                    .map_err(|_| VE::InvalidDeck)?;
                 let date_b = NaiveDateTime::parse_from_str(
-                    parts.next().ok_or(MissingDueDate)?,
+                    parts.next().ok_or(VE::MissingDueDate)?,
                     "%Y-%m-%d %H:%M:%S",
                 )
-                .map_err(|_| InvalidDueDate)?;
+                .map_err(|_| VE::InvalidDueDate)?;
                 Some(VocabMetadata {
                     deck,
                     due_date: date,

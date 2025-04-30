@@ -103,7 +103,6 @@ fn get_system_config_dir() -> Result<String, std::env::VarError> {
     Ok(config_dir)
 }
 
-
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -117,13 +116,20 @@ mod tests {
         assert_eq!(config.memorization.memorization_reversed, false);
         assert_eq!(config.validation.error_tolerance, 2);
         assert_eq!(config.validation.tolerance_min_length, 5);
-        assert_eq!(config.deck_config.deck_durations, vec![0, 1, 7, 14, 30, 60, 90, 180, 365]);
+        assert_eq!(
+            config.deck_config.deck_durations,
+            vec![0, 1, 7, 14, 30, 60, 90, 180, 365]
+        );
         assert_eq!(config.special_letters.0.len(), 3);
     }
 
     #[test]
     fn system_config_dir() {
         assert!(fs::exists(get_system_config_dir().unwrap()).unwrap());
-        assert!(fs::metadata(get_system_config_dir().unwrap()).unwrap().is_dir());
+        assert!(
+            fs::metadata(get_system_config_dir().unwrap())
+                .unwrap()
+                .is_dir()
+        );
     }
 }

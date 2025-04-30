@@ -40,8 +40,8 @@ fn main() -> Result<()> {
 #[derive(clap::Parser, Debug)]
 #[clap(name = "vocab_trainer", version, about)]
 struct Arguments {
-    /// Limit for the number of distinct cards to show. Note that the actual number of tasks presented 
-    /// may be higher since both directions are tested and a potential memorization round. 
+    /// Limit for the number of distinct cards to show. Note that the actual number of tasks presented
+    /// may be higher since both directions are tested and a potential memorization round.
     #[arg(short, long)]
     limit: Option<usize>,
     /// Show all cards, even if they are not due
@@ -67,14 +67,9 @@ enum InputMode {
     Editing,
 }
 
-struct Review {
-    correct: bool,
-    // correct_answer: String,
-}
-
 enum CurrentScreen {
     Query,
-    Review(Review),
+    Review { correct: bool },
 }
 
 enum KeyHandleResult {
@@ -150,25 +145,19 @@ impl App {
     }
 
     fn delete_char(&mut self) {
-        let is_not_cursor_leftmost = self.cursor_pos != 0;
-        if is_not_cursor_leftmost {
-            // Method "remove" is not used on the saved text for deleting the selected char.
-            // Reason: Using remove on String works on bytes instead of the chars.
-            // Using remove would require special care because of char boundaries.
-
-            let current_index = self.cursor_pos;
-            let from_left_to_current_index = current_index - 1;
-
-            // Getting all characters before the selected character.
-            let before_char_to_delete = self.input.chars().take(from_left_to_current_index);
-            // Getting all characters after selected character.
-            let after_char_to_delete = self.input.chars().skip(current_index);
-
-            // Put all characters together except the selected one.
-            // By leaving the selected one out, it is forgotten and therefore deleted.
-            self.input = before_char_to_delete.chain(after_char_to_delete).collect();
-            self.move_cursor_left();
+        if self.cursor_pos == 0 {
+            return;
         }
+        // "remove" method works with byte positions, so delete manually
+        let current_index = self.cursor_pos;
+        let from_left_to_current_index = current_index - 1;
+
+        let before_char_to_delete = self.input.chars().take(from_left_to_current_index);
+        let after_char_to_delete = self.input.chars().skip(current_index);
+
+        // Put the string back together without the character to delete
+        self.input = before_char_to_delete.chain(after_char_to_delete).collect();
+        self.move_cursor_left();
     }
 
     fn clamp_cursor(&self, new_cursor_pos: usize) -> usize {
@@ -204,10 +193,10 @@ impl App {
         let correct = current_task.is_correct(answer.as_str(), &self.config.validation);
         match &self.current_screen {
             CurrentScreen::Query => {
-                self.current_screen = CurrentScreen::Review(Review { correct });
+                self.current_screen = CurrentScreen::Review { correct };
             }
-            CurrentScreen::Review(review) if correct => {
-                self.next_card(review.correct);
+            CurrentScreen::Review { correct: r_correct } if correct => {
+                self.next_card(*r_correct);
             }
             _ => {}
         }
@@ -230,22 +219,22 @@ impl App {
                     return KeyHandleResult::Quit { save: true };
                 }
                 KeyCode::Enter => {
-                    if let CurrentScreen::Review(review) = &self.current_screen {
-                        if review.correct {
+                    if let CurrentScreen::Review { correct } = &self.current_screen {
+                        if *correct {
                             self.next_card(true);
                         }
                     }
                 }
                 KeyCode::Char('a') => {
-                    if let CurrentScreen::Review(review) = &self.current_screen {
-                        if !review.correct {
+                    if let CurrentScreen::Review { correct } = &self.current_screen {
+                        if !correct {
                             self.next_card(true);
                         }
                     }
                 }
                 KeyCode::Char('r') => {
-                    if let CurrentScreen::Review(review) = &self.current_screen {
-                        if review.correct {
+                    if let CurrentScreen::Review { correct } = &self.current_screen {
+                        if *correct {
                             self.next_card(false);
                         }
                     }
@@ -334,18 +323,16 @@ impl App {
         let [vocab_prompt_area, input_area, correct_answer_area] = horizontal.areas(prompt_area);
 
         let msg = match self.input_mode {
-            InputMode::Normal => {
-                match self.current_screen {
-                    CurrentScreen::Review(Review { correct }) => {
-                        if correct {
-                            vec!["Press ".into(), "r".bold(), " to reject anyway".into()]
-                        } else {
-                            vec!["Press ".into(), "a".bold(), " to accept anyway".into()]
-                        }
+            InputMode::Normal => match self.current_screen {
+                CurrentScreen::Review { correct } => {
+                    if correct {
+                        vec!["Press ".into(), "r".bold(), " to reject anyway".into()]
+                    } else {
+                        vec!["Press ".into(), "a".bold(), " to accept anyway".into()]
                     }
-                    _ => vec!["Press ".into(), "h".bold(), " to show keybinds".into()]
                 }
-            }
+                _ => vec!["Press ".into(), "h".bold(), " to show keybinds".into()],
+            },
             InputMode::Editing => vec![
                 "Press ".into(),
                 "Esc".bold(),
@@ -366,11 +353,7 @@ impl App {
             .block(Block::bordered().title("Input"));
         frame.render_widget(input, input_area);
         match self.input_mode {
-            // Hide the cursor. `Frame` does this by default, so we don't need to do anything here
             InputMode::Normal => {}
-
-            // Make the cursor visible and ask ratatui to put it at the specified coordinates after
-            // rendering
             #[allow(clippy::cast_possible_truncation)]
             InputMode::Editing => frame.set_cursor_position(Position::new(
                 input_area.x + self.cursor_pos as u16 + 1,
@@ -391,7 +374,7 @@ impl App {
             progress,
         );
 
-        if let CurrentScreen::Review(Review { correct }) = &self.current_screen {
+        if let CurrentScreen::Review { correct } = &self.current_screen {
             let area = frame.area();
 
             let canvas = Canvas::default()
@@ -410,9 +393,7 @@ impl App {
             frame.render_widget(canvas, area);
         }
 
-        if matches!(self.current_screen, CurrentScreen::Review(Review { .. }))
-            || current_card.show_answer
-        {
+        if matches!(self.current_screen, CurrentScreen::Review { .. }) || current_card.show_answer {
             frame.render_widget(
                 Paragraph::new(current_card.answer.to_string())
                     .block(Block::bordered().title("Correct Answer")),
@@ -427,7 +408,6 @@ impl App {
         }
     }
 }
-
 
 trait Popup {
     fn handle_events(&self, event: Event) -> PopupEventResult;
@@ -464,9 +444,7 @@ impl Popup for SpecialLettersPopup {
         if digit >= self.letters.len() as i32 || digit < 0 {
             return IGNORE;
         }
-        PopupEventResult::Insert(
-            self.letters[digit as usize].clone(),
-        )
+        PopupEventResult::Insert(self.letters[digit as usize].clone())
     }
 
     fn draw(&self, frame: &mut Frame) {
@@ -509,8 +487,6 @@ struct NoCardsLeftScreen {
 }
 
 impl Widget for NoCardsLeftScreen {
-
-    
     fn render(self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,
@@ -564,7 +540,10 @@ impl Popup for HelpWidget {
             ("r", "Reject anyway"),
             ("Esc", "Stop editing"),
             ("Ctrl+Space", "Show all special letters (in edit mode)"),
-            ("Ctrl+<Key>", "Show special letters for <Key> (in edit mode)"), 
+            (
+                "Ctrl+<Key>",
+                "Show special letters for <Key> (in edit mode)",
+            ),
             ("e", "Enter edit mode"),
             ("s", "Skip"),
         ];

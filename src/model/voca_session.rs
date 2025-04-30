@@ -67,7 +67,6 @@ impl VocaSession {
                     });
                 }
 
-                
                 let add_to_queue = use_all
                     || !matches!(&card.metadata, Some(metadata) if metadata.due_date > current_date);
                 if add_to_queue {
@@ -153,7 +152,8 @@ impl VocaSession {
             if !index.memorization_card {
                 self.queue.push_back(index);
             } else {
-                self.datasets[index.dataset].cards[index.card].metadata = Some(VocabMetadata::default());
+                self.datasets[index.dataset].cards[index.card].metadata =
+                    Some(VocabMetadata::default());
                 self.has_changes = true;
             }
         }
