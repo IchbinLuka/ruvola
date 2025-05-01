@@ -2,6 +2,8 @@ use std::{error::Error, io::BufRead};
 
 use chrono::{DateTime, NaiveDateTime};
 
+use crate::FilterMode;
+
 #[derive(Debug)]
 pub struct Vocab {
     pub word_a: String,
@@ -30,6 +32,29 @@ impl Default for VocabMetadata {
 }
 
 impl Vocab {
+    pub fn is_due(
+        &self,
+        reverse: bool,
+        filter_mode: FilterMode,
+        current_date: NaiveDateTime,
+    ) -> bool {
+        match filter_mode {
+            FilterMode::All => true,
+            FilterMode::Unseen => self.metadata.is_none(),
+            FilterMode::Seen | FilterMode::Normal => {
+                if let Some(metadata) = &self.metadata {
+                    if reverse {
+                        metadata.due_date_reverse < current_date
+                    } else {
+                        metadata.due_date < current_date
+                    }
+                } else {
+                    matches!(filter_mode, FilterMode::Unseen)
+                }
+            }
+        }
+    }
+
     pub fn update_metadata(&mut self, deck: u8, due_date: NaiveDateTime, reverse: bool) {
         if reverse {
             self.metadata = Some(VocabMetadata {

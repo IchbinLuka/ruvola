@@ -23,8 +23,12 @@ fn main() -> Result<()> {
     let args = Arguments::parse();
     cli_log::init_cli_log!();
     let config = config::AppConfig::load_from_config_file()?;
-    let session =
-        VocaSession::from_files(&args.file_paths, args.all, args.limit, &config.memorization)?;
+    let session = VocaSession::from_files(
+        &args.file_paths,
+        (&args).try_into()?,
+        args.limit,
+        &config.memorization,
+    )?;
     let mut terminal = ratatui::init();
     // Set cursor style to steady bar
     execute!(
@@ -46,9 +50,49 @@ struct Arguments {
     limit: Option<usize>,
     /// Show all cards, even if they are not due
     #[arg(short, long)]
-    all: bool,
+    ignore_date: bool,
+    /// Show only cards that have been seen before
+    #[arg(long)]
+    only_seen: bool,
+    /// Show only new cards
+    #[arg(long)]
+    only_unseen: bool,
     /// Paths to the vocab files
     file_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FilterMode {
+    Normal,
+    All,
+    Seen,
+    Unseen,
+}
+
+impl TryFrom<&Arguments> for FilterMode {
+    type Error = anyhow::Error;
+
+    fn try_from(args: &Arguments) -> Result<Self> {
+        if [args.only_seen, args.only_unseen, args.ignore_date]
+            .iter()
+            .filter(|&&x| x)
+            .count()
+            > 1
+        {
+            return Err(anyhow::anyhow!(
+                "Only one of --only-seen, --only-unseen, or --ignore-date can be specified"
+            ));
+        }
+        Ok(if args.only_seen {
+            FilterMode::Seen
+        } else if args.only_unseen {
+            FilterMode::Unseen
+        } else if args.ignore_date {
+            FilterMode::All
+        } else {
+            FilterMode::Normal
+        })
+    }
 }
 
 /// App holds the state of the application

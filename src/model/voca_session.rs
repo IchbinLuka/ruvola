@@ -1,6 +1,9 @@
 use std::collections::VecDeque;
 
-use crate::config::{DeckConfig, MemorizationConfig, ValidationConfig};
+use crate::{
+    FilterMode,
+    config::{DeckConfig, MemorizationConfig, ValidationConfig},
+};
 
 use super::voca_card::{VocaCardDataset, VocaParseError, VocabMetadata};
 use std::io::Write;
@@ -38,7 +41,7 @@ pub struct VocaSession {
 impl VocaSession {
     fn new(
         datasets: Vec<VocaCardDataset>,
-        use_all: bool,
+        filter_mode: FilterMode,
         limit: Option<usize>,
         memorization_config: &MemorizationConfig,
     ) -> Self {
@@ -56,7 +59,12 @@ impl VocaSession {
                     }
                 }
 
-                if card.metadata.is_none() && memorization_config.do_memorization_round {
+                let add_to_queue = card.is_due(false, filter_mode, current_date);
+                let add_to_queue_reverse = card.is_due(true, filter_mode, current_date);
+
+                let card_used = add_to_queue || add_to_queue_reverse;
+
+                if card.metadata.is_none() && memorization_config.do_memorization_round && card_used {
                     queue_unseen.push_back(VocabItem {
                         dataset: i,
                         card: j,
@@ -65,8 +73,7 @@ impl VocaSession {
                     });
                 }
 
-                let add_to_queue = use_all
-                    || !matches!(&card.metadata, Some(metadata) if metadata.due_date > current_date);
+                
                 if add_to_queue {
                     queue_seen.push_back(VocabItem {
                         dataset: i,
@@ -75,8 +82,7 @@ impl VocaSession {
                         memorization_card: false,
                     });
                 }
-                let add_to_queue_reverse = use_all
-                    || !matches!(&card.metadata, Some(metadata) if metadata.due_date_reverse > current_date);
+                
                 if add_to_queue_reverse {
                     queue_reverse.push_back(VocabItem {
                         dataset: i,
@@ -85,7 +91,7 @@ impl VocaSession {
                         memorization_card: false,
                     });
                 }
-                if add_to_queue || add_to_queue_reverse {
+                if card_used {
                     num_cards += 1;
                 }
             }
@@ -231,7 +237,7 @@ impl VocaSession {
 
     pub fn from_files(
         file_paths: &[String],
-        use_all: bool,
+        filter_mode: FilterMode,
         limit: Option<usize>,
         memorization_config: &MemorizationConfig,
     ) -> Result<Self, VocaParseError> {
@@ -241,7 +247,7 @@ impl VocaSession {
             .collect::<Result<Vec<_>, VocaParseError>>()?;
         Ok(VocaSession::new(
             datasets,
-            use_all,
+            filter_mode,
             limit,
             memorization_config,
         ))
