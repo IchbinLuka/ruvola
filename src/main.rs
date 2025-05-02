@@ -42,7 +42,7 @@ fn main() -> Result<()> {
 }
 
 #[derive(clap::Parser, Debug)]
-#[clap(name = "vocab_trainer", version, about)]
+#[clap(name = "ruvola", version, about)]
 struct Arguments {
     /// Limit for the number of distinct cards to show. Note that the actual number of tasks presented
     /// may be higher since both directions are tested and a potential memorization round.

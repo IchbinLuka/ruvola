@@ -49,7 +49,7 @@ impl Vocab {
                         metadata.due_date < current_date
                     }
                 } else {
-                    matches!(filter_mode, FilterMode::Unseen)
+                    matches!(filter_mode, FilterMode::Normal)
                 }
             }
         }
