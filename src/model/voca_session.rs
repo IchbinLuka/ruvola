@@ -5,7 +5,7 @@ use crate::{
     config::{DeckConfig, MemorizationConfig, ValidationConfig},
 };
 
-use super::voca_card::{VocaCardDataset, VocaParseError, VocabMetadata};
+use super::voca_card::{VocaCardDataset, VocaParseError, Vocab, VocabMetadata};
 use std::io::Write;
 
 pub struct VocabTask {
@@ -42,6 +42,7 @@ impl VocaSession {
     fn new(
         datasets: Vec<VocaCardDataset>,
         filter_mode: FilterMode,
+        sorted: bool,
         limit: Option<usize>,
         memorization_config: &MemorizationConfig,
     ) -> Self {
@@ -51,49 +52,74 @@ impl VocaSession {
         // let mut queue_reverse = VecDeque::new();
         let current_date = chrono::Local::now().naive_utc();
         let mut num_cards = 0;
-        for (i, dataset) in datasets.iter().enumerate() {
-            for (j, card) in dataset.cards.iter().enumerate() {
-                if let Some(limit) = limit {
-                    if num_cards >= limit {
-                        break;
+        let mut all_vocabs = datasets
+            .iter()
+            .enumerate()
+            .flat_map(|(i, dataset)| {
+                dataset
+                    .cards
+                    .iter()
+                    .enumerate()
+                    .map(move |(j, card)| ((i, j), card))
+            })
+            .collect::<Vec<_>>();
+        if sorted {
+            all_vocabs.sort_by(
+                |(_, Vocab { metadata: a, .. }), (_, Vocab { metadata: b, .. })| {
+                    if let Some(a) = a {
+                        if let Some(b) = b {
+                            a.due_date.cmp(&b.due_date)
+                        } else {
+                            std::cmp::Ordering::Greater
+                        }
+                    } else if b.is_some() {
+                        std::cmp::Ordering::Less
+                    } else {
+                        std::cmp::Ordering::Equal
                     }
+                },
+            );
+        }
+        for ((i, j), card) in all_vocabs {
+            if let Some(limit) = limit {
+                if num_cards >= limit {
+                    break;
                 }
+            }
 
-                let add_to_queue = card.is_due(false, filter_mode, current_date);
-                let add_to_queue_reverse = card.is_due(true, filter_mode, current_date);
+            let add_to_queue = card.is_due(false, filter_mode, current_date);
+            let add_to_queue_reverse = card.is_due(true, filter_mode, current_date);
 
-                let card_used = add_to_queue || add_to_queue_reverse;
+            let card_used = add_to_queue || add_to_queue_reverse;
 
-                if card.metadata.is_none() && memorization_config.do_memorization_round && card_used {
-                    queue_unseen.push_back(VocabItem {
-                        dataset: i,
-                        card: j,
-                        reverse: memorization_config.memorization_reversed,
-                        memorization_card: true,
-                    });
-                }
+            if card.metadata.is_none() && memorization_config.do_memorization_round && card_used {
+                queue_unseen.push_back(VocabItem {
+                    dataset: i,
+                    card: j,
+                    reverse: memorization_config.memorization_reversed,
+                    memorization_card: true,
+                });
+            }
 
-                
-                if add_to_queue {
-                    queue_seen.push_back(VocabItem {
-                        dataset: i,
-                        card: j,
-                        reverse: false,
-                        memorization_card: false,
-                    });
-                }
-                
-                if add_to_queue_reverse {
-                    queue_reverse.push_back(VocabItem {
-                        dataset: i,
-                        card: j,
-                        reverse: true,
-                        memorization_card: false,
-                    });
-                }
-                if card_used {
-                    num_cards += 1;
-                }
+            if add_to_queue {
+                queue_seen.push_back(VocabItem {
+                    dataset: i,
+                    card: j,
+                    reverse: false,
+                    memorization_card: false,
+                });
+            }
+
+            if add_to_queue_reverse {
+                queue_reverse.push_back(VocabItem {
+                    dataset: i,
+                    card: j,
+                    reverse: true,
+                    memorization_card: false,
+                });
+            }
+            if card_used {
+                num_cards += 1;
             }
         }
 
@@ -238,6 +264,7 @@ impl VocaSession {
     pub fn from_files(
         file_paths: &[String],
         filter_mode: FilterMode,
+        sorted: bool,
         limit: Option<usize>,
         memorization_config: &MemorizationConfig,
     ) -> Result<Self, VocaParseError> {
@@ -248,8 +275,92 @@ impl VocaSession {
         Ok(VocaSession::new(
             datasets,
             filter_mode,
+            sorted,
             limit,
             memorization_config,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sorting() {
+        let card1 = Vocab {
+            word_a: "hello".to_string(),
+            word_b: "hola".to_string(),
+            metadata: Some(VocabMetadata {
+                deck: 1,
+                due_date: chrono::NaiveDateTime::parse_from_str(
+                    "2023-10-01 12:00:00",
+                    "%Y-%m-%d %H:%M:%S",
+                )
+                .unwrap(),
+                deck_reverse: 2,
+                due_date_reverse: chrono::NaiveDateTime::parse_from_str(
+                    "2024-10-01 13:00:00",
+                    "%Y-%m-%d %H:%M:%S",
+                )
+                .unwrap(),
+            }),
+        };
+        let card2 = Vocab {
+            word_a: "world".to_string(),
+            word_b: "mundo".to_string(),
+            metadata: Some(VocabMetadata {
+                deck: 2,
+                due_date: chrono::NaiveDateTime::parse_from_str(
+                    "2023-09-01 12:00:00",
+                    "%Y-%m-%d %H:%M:%S",
+                )
+                .unwrap(),
+                deck_reverse: 1,
+                due_date_reverse: chrono::NaiveDateTime::parse_from_str(
+                    "2024-09-01 13:00:00",
+                    "%Y-%m-%d %H:%M:%S",
+                )
+                .unwrap(),
+            }),
+        };
+        let card3 = Vocab {
+            word_a: "test".to_string(),
+            word_b: "prueba".to_string(),
+            metadata: Some(VocabMetadata {
+                deck: 1,
+                due_date: chrono::NaiveDateTime::parse_from_str(
+                    "2023-08-01 12:00:00",
+                    "%Y-%m-%d %H:%M:%S",
+                )
+                .unwrap(),
+                deck_reverse: 2,
+                due_date_reverse: chrono::NaiveDateTime::parse_from_str(
+                    "2024-08-01 13:00:00",
+                    "%Y-%m-%d %H:%M:%S",
+                )
+                .unwrap(),
+            }),
+        };
+
+        let dataset = VocaCardDataset {
+            cards: vec![card1, card2, card3],
+            file_path: "test.txt".to_string(),
+            lang_a: "English".to_string(),
+            lang_b: "Spanish".to_string(),
+        };
+
+        let session = VocaSession::new(
+            vec![dataset],
+            FilterMode::All,
+            true,
+            None,
+            &MemorizationConfig::default(),
+        );
+
+        assert_eq!(session.queue.len(), 6);
+        assert_eq!(session.queue[0].card, 2); // "test"
+        assert_eq!(session.queue[1].card, 1); // "world"
+        assert_eq!(session.queue[2].card, 0); // "hello"
     }
 }

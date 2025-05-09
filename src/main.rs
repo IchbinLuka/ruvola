@@ -26,6 +26,7 @@ fn main() -> Result<()> {
     let session = VocaSession::from_files(
         &args.file_paths,
         (&args).try_into()?,
+        args.sort,
         args.limit,
         &config.memorization,
     )?;
@@ -57,6 +58,9 @@ struct Arguments {
     /// Show only new cards
     #[arg(long)]
     only_unseen: bool,
+    /// Sort the cards by their due date
+    #[arg(short, long)]
+    sort: bool,
     /// Paths to the vocab files
     file_paths: Vec<String>,
 }
@@ -279,7 +283,7 @@ impl App {
                 KeyCode::Char('r') => {
                     if let CurrentScreen::Review { correct } = &self.current_screen {
                         if *correct {
-                            self.next_card(false);
+                            self.current_screen = CurrentScreen::Review { correct: false };
                         }
                     }
                 }
