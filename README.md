@@ -56,6 +56,7 @@ RuVoLA allows customization using a configuration file. This file needs to be cr
 - `$HOME/Library/Application Support/ruvola/config.toml` on MacOS
 - `%APPDATA%/ruvola/config.toml` on Windows
 
+In addition to this global configuration file, it is also possible to specify local config overrides by providing a `ruvola.toml` file in the current working directory or specifying a config file using the `--override-config-file [file]` argument. This allows you to have individual configurations for different contexts. 
 
 Below is an example configuration file, additionally providing special characters for german, italian and french. 
 

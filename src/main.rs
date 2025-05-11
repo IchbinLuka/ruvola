@@ -22,7 +22,7 @@ mod model;
 fn main() -> Result<()> {
     let args = Arguments::parse();
     cli_log::init_cli_log!();
-    let config = config::AppConfig::load_from_config_file()?;
+    let config = config::AppConfig::load_from_config_file(args.override_config_file.as_deref())?;
     let session = VocaSession::from_files(
         &args.file_paths,
         (&args).try_into()?,
@@ -61,6 +61,9 @@ struct Arguments {
     /// Sort the cards by their due date
     #[arg(short, long)]
     sort: bool,
+    /// Path to a local config file that overrides attributes of the global config file
+    #[arg(long)]
+    override_config_file: Option<String>,
     /// Paths to the vocab files
     file_paths: Vec<String>,
 }

@@ -13,18 +13,25 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn load_from_config_file() -> Result<Self> {
+    pub fn load_from_config_file(local_path: Option<&str>) -> Result<Self> {
+        const LOCAL_CONFIG_FILE: &str = "./ruvola.toml";
+        let local_config_path = local_path.unwrap_or(LOCAL_CONFIG_FILE);
+
         let config_path = get_system_config_dir()?;
         let config_file = format!("{}/ruvola/config.toml", config_path);
         if std::fs::exists(&config_file)? {
-            Self::load_from_file(&config_file)
+            let base_config = toml::de::from_str(&std::fs::read_to_string(&config_file)?)?;
+            if std::fs::exists(local_config_path)? {
+                let override_config =
+                    toml::de::from_str(&std::fs::read_to_string(local_config_path)?)?;
+                let merged_config = deep_override_config(base_config, override_config);
+                Ok(merged_config.try_into()?)
+            } else {
+                Ok(base_config.try_into()?)
+            }
         } else {
             Ok(Self::default())
         }
-    }
-
-    pub fn load_from_file(file_path: &str) -> Result<Self> {
-        Ok(toml::de::from_str(&std::fs::read_to_string(file_path)?)?)
     }
 }
 
@@ -164,6 +171,22 @@ fn parse_complex_duration(complex: &str) -> Result<Duration, IntervalParseError>
     }
 }
 
+fn deep_override_config(base: toml::Value, override_config: toml::Value) -> toml::Value {
+    match (base, override_config) {
+        (toml::Value::Table(mut base_map), toml::Value::Table(override_map)) => {
+            for (key, value) in override_map {
+                if let Some(base_value) = base_map.get_mut(&key) {
+                    *base_value = deep_override_config(base_value.clone(), value);
+                } else {
+                    base_map.insert(key, value);
+                }
+            }
+            toml::Value::Table(base_map)
+        }
+        (_, override_value) => override_value,
+    }
+}
+
 #[cfg(target_os = "linux")]
 fn get_system_config_dir() -> Result<String, std::env::VarError> {
     let config_dir = std::env::var("XDG_CONFIG_HOME")
@@ -188,11 +211,46 @@ fn get_system_config_dir() -> Result<String, std::env::VarError> {
 mod tests {
     use std::fs;
 
+    use toml::toml;
+
     use super::*;
 
     #[test]
+    fn deep_override_config_test() {
+        let base: toml::Value = toml! {
+            [section]
+            key = "value"
+            nested = { key1 = "value1", key2 = "value2" }
+        }
+        .into();
+        let override_config: toml::Value = toml! {
+            [section]
+            key = "new_value"
+            nested = { key3 = "new_value2" }
+
+            [new_section]
+            key = "new_value"
+        }
+        .into();
+        let expected: toml::Value = toml! {
+            [section]
+            key = "new_value"
+            nested = { key1 = "value1", key2 = "value2", key3 = "new_value2" }
+
+            [new_section]
+            key = "new_value"
+        }
+        .into();
+
+        let result = deep_override_config(base, override_config);
+        assert_eq!(result, expected);
+    }
+
+    #[test]
     fn validate_config_preset() {
-        let config = AppConfig::load_from_file("config_preset/config.toml").unwrap();
+        let config: AppConfig =
+            toml::de::from_str(&std::fs::read_to_string("config_preset/config.toml").unwrap())
+                .unwrap();
         assert_eq!(config.memorization.do_memorization_round, true);
         assert_eq!(config.memorization.memorization_reversed, false);
         assert_eq!(config.validation.error_tolerance, 2);
