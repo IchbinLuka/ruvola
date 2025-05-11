@@ -283,7 +283,7 @@ impl App {
                 KeyCode::Char('r') => {
                     if let CurrentScreen::Review { correct } = &self.current_screen {
                         if *correct {
-                            self.current_screen = CurrentScreen::Review { correct: false };
+                            self.next_card(false);
                         }
                     }
                 }
