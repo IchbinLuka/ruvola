@@ -290,7 +290,7 @@ impl App {
                         }
                     }
                 }
-                KeyCode::Char('s') => {
+                KeyCode::Char('s') if matches!(self.current_screen, CurrentScreen::Query) => {
                     self.reset_input();
                     self.voca_session.skip_card();
                 }
