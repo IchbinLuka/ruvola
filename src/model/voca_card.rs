@@ -13,7 +13,7 @@ pub struct Vocab {
 
 #[derive(Debug)]
 pub struct VocabWord {
-    pub base: String, 
+    pub base: String,
     pub variants: Vec<String>,
 }
 
@@ -22,25 +22,27 @@ impl VocabWord {
         static BRACKET_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
             regex::Regex::new(r"\(.*\)").expect("Failed to compile bracket regex")
         });
-        
+
         let base = s.to_string();
         let mut variants = Vec::new();
-        let comma_split = s.split(',').map(|v| v.trim().to_string()).collect::<Vec<String>>();
+        let comma_split = s
+            .split(',')
+            .map(|v| v.trim().to_string())
+            .collect::<Vec<String>>();
         variants.extend(comma_split);
 
         // let bracket_regex = regex::Regex::new(r"\(.*\)").unwrap();
-        let bracket_variants = variants.iter().filter_map(|s| {
-            BRACKET_REGEX.find(s).map(|_| {
-                BRACKET_REGEX.replace_all(s, "").trim().to_string()
+        let bracket_variants = variants
+            .iter()
+            .filter_map(|s| {
+                BRACKET_REGEX
+                    .find(s)
+                    .map(|_| BRACKET_REGEX.replace_all(s, "").trim().to_string())
             })
-        }).collect::<Vec<String>>();
+            .collect::<Vec<String>>();
         variants.extend(bracket_variants);
 
-
-        Self { 
-            base,
-            variants: variants,
-        }
+        Self { base, variants }
     }
 }
 
@@ -311,7 +313,8 @@ mod tests {
         assert_eq!(card.word_a.variants, vec!["hello", "hi"]);
         assert_eq!(card.word_b.variants, vec!["world", "earth"]);
 
-        let line = "hello (greeting)\tworld (planet)\t1\t2023-10-01 12:00:00\t2\t2024-10-01 13:00:00";
+        let line =
+            "hello (greeting)\tworld (planet)\t1\t2023-10-01 12:00:00\t2\t2024-10-01 13:00:00";
         let card = Vocab::from_line(line).unwrap();
         assert_eq!(card.word_a.base, "hello (greeting)");
         assert_eq!(card.word_b.base, "world (planet)");

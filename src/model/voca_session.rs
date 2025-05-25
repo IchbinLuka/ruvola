@@ -11,11 +11,11 @@ use std::io::Write;
 pub struct VocabTask<'a> {
     pub query: &'a str,
     pub answer: &'a str,
-    pub answer_variants: &'a[String],
+    pub answer_variants: &'a [String],
     pub show_answer: bool,
 }
 
-impl<'a> VocabTask<'a> {
+impl VocabTask<'_> {
     pub fn is_correct(&self, answer: &str, val_config: &ValidationConfig) -> bool {
         for variant in self.answer_variants {
             if variant.len() < val_config.tolerance_min_length {
@@ -156,8 +156,16 @@ impl VocaSession {
                 .get(index.dataset)
                 .and_then(|d| d.cards.get(index.card))
                 .map(|card| {
-                    let query = if index.reverse { &card.word_a} else { &card.word_b };
-                    let answer = if index.reverse { &card.word_b} else { &card.word_a };
+                    let query = if index.reverse {
+                        &card.word_a
+                    } else {
+                        &card.word_b
+                    };
+                    let answer = if index.reverse {
+                        &card.word_b
+                    } else {
+                        &card.word_a
+                    };
                     VocabTask {
                         query: &query.base,
                         answer: &answer.base,
