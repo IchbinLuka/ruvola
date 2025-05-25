@@ -4,16 +4,9 @@ use config::AppConfig;
 use crossterm::execute;
 use model::voca_session::VocaSession;
 use ratatui::{
-    DefaultTerminal, Frame,
-    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers},
-    layout::{Constraint, Flex, Layout, Position},
-    style::{Color, Style, Stylize},
-    symbols::Marker,
-    text::{Line, Span, Text},
-    widgets::{
-        Block, Clear, List, Padding, Paragraph, Row, Table, Widget,
-        canvas::{Canvas, Rectangle},
-    },
+    crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers}, layout::{Constraint, Flex, Layout, Position}, style::{Color, Style, Stylize}, symbols::Marker, text::{Line, Span, Text}, widgets::{
+        canvas::{Canvas, Rectangle}, Block, Clear, List, Padding, Paragraph, Row, Table, Widget, Wrap
+    }, DefaultTerminal, Frame
 };
 
 mod config;
@@ -396,25 +389,28 @@ impl App {
         let text = Text::from(Line::from(msg));
         let help_message = Paragraph::new(text);
         frame.render_widget(help_message, help_area);
-
-        let input = Paragraph::new(self.input.as_str())
+        let x = self.cursor_pos as u16;
+        
+        let input = Paragraph::new(simple_soft_wrap(&self.input, input_area.width as usize - 2))
             .style(match self.input_mode {
                 InputMode::Normal => Style::default(),
                 InputMode::Editing => Style::default().fg(Color::LightBlue),
             })
             .block(Block::bordered().title("Input"));
         frame.render_widget(input, input_area);
+        
         match self.input_mode {
             InputMode::Normal => {}
             #[allow(clippy::cast_possible_truncation)]
             InputMode::Editing => frame.set_cursor_position(Position::new(
-                input_area.x + self.cursor_pos as u16 + 1,
-                input_area.y + 1,
+                input_area.x + 1 + (x % (input_area.width - 2)),
+                input_area.y + 1 + x / (input_area.width - 2),
             )),
         }
+        
 
         frame.render_widget(
-            Paragraph::new(current_card.query.to_string()).block(Block::bordered()),
+            Paragraph::new(current_card.query.to_string()).wrap(Wrap { trim: false }).block(Block::bordered()),
             vocab_prompt_area,
         );
         frame.render_widget(
@@ -448,6 +444,7 @@ impl App {
         if matches!(self.current_screen, CurrentScreen::Review { .. }) || current_card.show_answer {
             frame.render_widget(
                 Paragraph::new(current_card.answer.to_string())
+                    .wrap(Wrap { trim: false })
                     .block(Block::bordered().title("Correct Answer")),
                 correct_answer_area,
             );
@@ -637,4 +634,17 @@ impl Popup for HelpWidget {
         frame.render_widget(Clear, help_area);
         frame.render_widget(table, help_area);
     }
+}
+
+
+fn simple_soft_wrap(input: &str, width: usize) -> String {
+    let length = input.chars().count();
+    let mut input_wrapped = Vec::<char>::with_capacity(length + (length / width));
+    for (i, c) in input.chars().enumerate() {
+        if (i % width) == 0 && i > 0 {
+            input_wrapped.push('\n');
+        }
+        input_wrapped.push(c);
+    }
+    input_wrapped.iter().collect()
 }
