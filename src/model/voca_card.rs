@@ -1,4 +1,4 @@
-use std::{error::Error, io::BufRead};
+use std::{error::Error, io::BufRead, sync::LazyLock};
 
 use chrono::{DateTime, NaiveDateTime};
 
@@ -6,9 +6,42 @@ use crate::FilterMode;
 
 #[derive(Debug)]
 pub struct Vocab {
-    pub word_a: String,
-    pub word_b: String,
+    pub word_a: VocabWord,
+    pub word_b: VocabWord,
     pub metadata: Option<VocabMetadata>,
+}
+
+#[derive(Debug)]
+pub struct VocabWord {
+    pub base: String, 
+    pub variants: Vec<String>,
+}
+
+impl VocabWord {
+    pub fn from_str(s: &str) -> Self {
+        static BRACKET_REGEX: LazyLock<regex::Regex> = LazyLock::new(|| {
+            regex::Regex::new(r"\(.*\)").expect("Failed to compile bracket regex")
+        });
+        
+        let base = s.to_string();
+        let mut variants = Vec::new();
+        let comma_split = s.split(',').map(|v| v.trim().to_string()).collect::<Vec<String>>();
+        variants.extend(comma_split);
+
+        // let bracket_regex = regex::Regex::new(r"\(.*\)").unwrap();
+        let bracket_variants = variants.iter().filter_map(|s| {
+            BRACKET_REGEX.find(s).map(|_| {
+                BRACKET_REGEX.replace_all(s, "").trim().to_string()
+            })
+        }).collect::<Vec<String>>();
+        variants.extend(bracket_variants);
+
+
+        Self { 
+            base,
+            variants: variants,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -17,7 +50,6 @@ pub struct VocabMetadata {
     pub deck: u8,
     pub due_date_reverse: NaiveDateTime,
     pub deck_reverse: u8,
-    // pub seen_before: bool,
 }
 
 impl Default for VocabMetadata {
@@ -115,8 +147,8 @@ impl Vocab {
         };
 
         Ok(Vocab {
-            word_a,
-            word_b,
+            word_a: VocabWord::from_str(&word_a),
+            word_b: VocabWord::from_str(&word_b),
             metadata,
         })
     }
@@ -256,8 +288,8 @@ mod tests {
     fn parse_card() {
         let line = "hello\tworld\t1\t2023-10-01 12:00:00\t2\t2024-10-01 13:00:00";
         let card = Vocab::from_line(line).unwrap();
-        assert_eq!(card.word_a, "hello");
-        assert_eq!(card.word_b, "world");
+        assert_eq!(card.word_a.base, "hello");
+        assert_eq!(card.word_b.base, "world");
         assert_eq!(card.metadata.as_ref().unwrap().deck, 1);
         assert_eq!(
             card.metadata.as_ref().unwrap().due_date,
@@ -268,5 +300,22 @@ mod tests {
             card.metadata.as_ref().unwrap().due_date_reverse,
             NaiveDateTime::parse_from_str("2024-10-01 13:00:00", "%Y-%m-%d %H:%M:%S").unwrap()
         );
+    }
+
+    #[test]
+    fn parse_card_with_variants() {
+        let line = "hello,hi\tworld,earth\t1\t2023-10-01 12:00:00\t2\t2024-10-01 13:00:00";
+        let card = Vocab::from_line(line).unwrap();
+        assert_eq!(card.word_a.base, "hello,hi");
+        assert_eq!(card.word_b.base, "world,earth");
+        assert_eq!(card.word_a.variants, vec!["hello", "hi"]);
+        assert_eq!(card.word_b.variants, vec!["world", "earth"]);
+
+        let line = "hello (greeting)\tworld (planet)\t1\t2023-10-01 12:00:00\t2\t2024-10-01 13:00:00";
+        let card = Vocab::from_line(line).unwrap();
+        assert_eq!(card.word_a.base, "hello (greeting)");
+        assert_eq!(card.word_b.base, "world (planet)");
+        assert_eq!(card.word_a.variants, vec!["hello (greeting)", "hello"]);
+        assert_eq!(card.word_b.variants, vec!["world (planet)", "world"]);
     }
 }

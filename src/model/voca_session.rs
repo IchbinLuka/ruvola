@@ -8,18 +8,25 @@ use crate::{
 use super::voca_card::{VocaCardDataset, VocaParseError, Vocab, VocabMetadata};
 use std::io::Write;
 
-pub struct VocabTask {
-    pub query: String,
-    pub answer: String,
+pub struct VocabTask<'a> {
+    pub query: &'a str,
+    pub answer: &'a str,
+    pub answer_variants: &'a[String],
     pub show_answer: bool,
 }
 
-impl VocabTask {
+impl<'a> VocabTask<'a> {
     pub fn is_correct(&self, answer: &str, val_config: &ValidationConfig) -> bool {
-        if self.answer.len() < val_config.tolerance_min_length {
-            return self.answer == answer;
+        for variant in self.answer_variants {
+            if variant.len() < val_config.tolerance_min_length {
+                if answer == variant {
+                    return true;
+                }
+            } else if edit_distance::edit_distance(variant, answer) <= val_config.error_tolerance {
+                return true;
+            }
         }
-        edit_distance::edit_distance(&self.answer, answer) <= val_config.error_tolerance
+        false
     }
 }
 
@@ -148,18 +155,15 @@ impl VocaSession {
             self.datasets
                 .get(index.dataset)
                 .and_then(|d| d.cards.get(index.card))
-                .map(|card| VocabTask {
-                    query: if index.reverse {
-                        card.word_b.clone()
-                    } else {
-                        card.word_a.clone()
-                    },
-                    answer: if index.reverse {
-                        card.word_a.clone()
-                    } else {
-                        card.word_b.clone()
-                    },
-                    show_answer: index.memorization_card,
+                .map(|card| {
+                    let query = if index.reverse { &card.word_a} else { &card.word_b };
+                    let answer = if index.reverse { &card.word_b} else { &card.word_a };
+                    VocabTask {
+                        query: &query.base,
+                        answer: &answer.base,
+                        answer_variants: &answer.variants,
+                        show_answer: index.memorization_card,
+                    }
                 })
         })
     }
@@ -246,14 +250,14 @@ impl VocaSession {
                 let line = match card.metadata {
                     Some(ref metadata) => format!(
                         "{}\t{}\t{}\t{}\t{}\t{}",
-                        card.word_a,
-                        card.word_b,
+                        card.word_a.base,
+                        card.word_b.base,
                         metadata.deck,
                         metadata.due_date.format("%Y-%m-%d %H:%M:%S"),
                         metadata.deck_reverse,
                         metadata.due_date_reverse.format("%Y-%m-%d %H:%M:%S")
                     ),
-                    None => format!("{}\t{}", card.word_a, card.word_b),
+                    None => format!("{}\t{}", card.word_a.base, card.word_b.base),
                 };
                 writeln!(file, "{}", line)?;
             }
@@ -284,13 +288,15 @@ impl VocaSession {
 
 #[cfg(test)]
 mod tests {
+    use crate::model::voca_card::VocabWord;
+
     use super::*;
 
     #[test]
     fn test_sorting() {
         let card1 = Vocab {
-            word_a: "hello".to_string(),
-            word_b: "hola".to_string(),
+            word_a: VocabWord::from_str("hello"),
+            word_b: VocabWord::from_str("hola"),
             metadata: Some(VocabMetadata {
                 deck: 1,
                 due_date: chrono::NaiveDateTime::parse_from_str(
@@ -307,8 +313,8 @@ mod tests {
             }),
         };
         let card2 = Vocab {
-            word_a: "world".to_string(),
-            word_b: "mundo".to_string(),
+            word_a: VocabWord::from_str("world"),
+            word_b: VocabWord::from_str("mundo"),
             metadata: Some(VocabMetadata {
                 deck: 2,
                 due_date: chrono::NaiveDateTime::parse_from_str(
@@ -325,8 +331,8 @@ mod tests {
             }),
         };
         let card3 = Vocab {
-            word_a: "test".to_string(),
-            word_b: "prueba".to_string(),
+            word_a: VocabWord::from_str("test"),
+            word_b: VocabWord::from_str("prueba"),
             metadata: Some(VocabMetadata {
                 deck: 1,
                 due_date: chrono::NaiveDateTime::parse_from_str(
@@ -362,5 +368,23 @@ mod tests {
         assert_eq!(session.queue[0].card, 2); // "test"
         assert_eq!(session.queue[1].card, 1); // "world"
         assert_eq!(session.queue[2].card, 0); // "hello"
+    }
+
+    #[test]
+    fn vocab_validation() {
+        let task = VocabTask {
+            query: "hello",
+            answer: "hola",
+            answer_variants: &vec!["hola".to_string(), "saludo".to_string()],
+            show_answer: false,
+        };
+        let val_config = ValidationConfig {
+            error_tolerance: 1,
+            tolerance_min_length: 3,
+        };
+        assert!(task.is_correct("hola", &val_config));
+        assert!(task.is_correct("hola!", &val_config));
+        assert!(task.is_correct("saludo", &val_config));
+        assert!(!task.is_correct("hello", &val_config));
     }
 }
