@@ -261,6 +261,9 @@ impl App {
         match self.input_mode {
             InputMode::Normal => match event.code {
                 KeyCode::Char('e') => {
+                    if let CurrentScreen::Review { correct: true } = &self.current_screen {
+                        return KeyHandleResult::None;
+                    }
                     self.input_mode = InputMode::Editing;
                 }
                 KeyCode::Char('Q') => {
@@ -270,10 +273,8 @@ impl App {
                     return KeyHandleResult::Quit { save: true };
                 }
                 KeyCode::Enter => {
-                    if let CurrentScreen::Review { correct } = &self.current_screen {
-                        if *correct {
-                            self.next_card(true);
-                        }
+                    if let CurrentScreen::Review { correct: true } = &self.current_screen {
+                        self.next_card(true);
                     }
                 }
                 KeyCode::Char('a') => {
