@@ -156,7 +156,7 @@ impl App {
             return;
         };
         if modifiers.contains(KeyModifiers::CONTROL) {
-            let Some(lang_chars) = self.config.special_letters.0.get(&target_lang) else {
+            let Some(lang_chars) = self.config.special_letters.0.get(target_lang) else {
                 return;
             };
             let popup = match c {
@@ -240,8 +240,7 @@ impl App {
         let Some(current_task) = self.voca_session.current_task() else {
             return;
         };
-        let answer = self.input.clone();
-        let correct = current_task.is_correct(answer.as_str(), &self.config.validation);
+        let correct = current_task.is_correct(&self.input, &self.config.validation);
         match &self.current_screen {
             CurrentScreen::Query => {
                 self.current_screen = CurrentScreen::Review { correct };
@@ -416,7 +415,7 @@ impl App {
         }
 
         frame.render_widget(
-            Paragraph::new(current_card.query.to_string())
+            Paragraph::new(current_card.query)
                 .wrap(Wrap { trim: false })
                 .block(Block::bordered()),
             vocab_prompt_area,
@@ -451,7 +450,7 @@ impl App {
 
         if matches!(self.current_screen, CurrentScreen::Review { .. }) || current_card.show_answer {
             frame.render_widget(
-                Paragraph::new(current_card.answer.to_string())
+                Paragraph::new(current_card.answer)
                     .wrap(Wrap { trim: false })
                     .block(Block::bordered().title("Correct Answer")),
                 correct_answer_area,

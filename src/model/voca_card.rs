@@ -119,8 +119,8 @@ impl Vocab {
         use VocaLineError as VE;
 
         let mut parts = line.split('\t');
-        let word_a = parts.next().ok_or(VE::MissingWordA)?.to_string();
-        let word_b = parts.next().ok_or(VE::MissingWordB)?.to_string();
+        let word_a = parts.next().ok_or(VE::MissingWordA)?;
+        let word_b = parts.next().ok_or(VE::MissingWordB)?;
         let metadata = match parts.next() {
             Some(deck) => {
                 let deck = deck.parse::<u8>().map_err(|_| VE::InvalidDeck)?;
@@ -149,8 +149,8 @@ impl Vocab {
         };
 
         Ok(Vocab {
-            word_a: VocabWord::from_str(&word_a),
-            word_b: VocabWord::from_str(&word_b),
+            word_a: VocabWord::from_str(word_a),
+            word_b: VocabWord::from_str(word_b),
             metadata,
         })
     }

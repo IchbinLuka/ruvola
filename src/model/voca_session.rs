@@ -157,14 +157,14 @@ impl VocaSession {
                 .and_then(|d| d.cards.get(index.card))
                 .map(|card| {
                     let query = if index.reverse {
-                        &card.word_a
-                    } else {
                         &card.word_b
+                    } else {
+                        &card.word_a
                     };
                     let answer = if index.reverse {
-                        &card.word_b
-                    } else {
                         &card.word_a
+                    } else {
+                        &card.word_b
                     };
                     VocabTask {
                         query: &query.base,
@@ -176,13 +176,13 @@ impl VocaSession {
         })
     }
 
-    pub fn current_target_lang(&self) -> Option<String> {
+    pub fn current_target_lang(&self) -> Option<&str> {
         self.queue.front().and_then(|index| {
             self.datasets.get(index.dataset).map(|d| {
                 if index.reverse {
-                    d.lang_a.clone()
+                    d.lang_a.as_ref()
                 } else {
-                    d.lang_b.clone()
+                    d.lang_b.as_ref()
                 }
             })
         })
