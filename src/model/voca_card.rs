@@ -24,14 +24,13 @@ impl VocabWord {
         });
 
         let base = s.to_string();
-        let mut variants = Vec::new();
+        let mut variants = vec![base.clone()];
         let comma_split = s
             .split(',')
             .map(|v| v.trim().to_string())
             .collect::<Vec<String>>();
         variants.extend(comma_split);
 
-        // let bracket_regex = regex::Regex::new(r"\(.*\)").unwrap();
         let bracket_variants = variants
             .iter()
             .filter_map(|s| {
@@ -310,8 +309,8 @@ mod tests {
         let card = Vocab::from_line(line).unwrap();
         assert_eq!(card.word_a.base, "hello,hi");
         assert_eq!(card.word_b.base, "world,earth");
-        assert_eq!(card.word_a.variants, vec!["hello", "hi"]);
-        assert_eq!(card.word_b.variants, vec!["world", "earth"]);
+        assert_eq!(card.word_a.variants, vec!["hello,hi", "hello", "hi"]);
+        assert_eq!(card.word_b.variants, vec!["world,earth", "world", "earth"]);
 
         let line =
             "hello (greeting)\tworld (planet)\t1\t2023-10-01 12:00:00\t2\t2024-10-01 13:00:00";
