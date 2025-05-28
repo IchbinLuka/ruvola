@@ -25,11 +25,16 @@ impl VocabWord {
 
         let base = s.to_string();
         let mut variants = vec![base.clone()];
-        let comma_split = s
-            .split(',')
-            .map(|v| v.trim().to_string())
-            .collect::<Vec<String>>();
-        variants.extend(comma_split);
+        let comma_split = s.split(',').collect::<Vec<&str>>();
+        // If we have only one part, base does not contain a comma, so don't do anything
+        if comma_split.len() > 1 {
+            variants.extend(
+                comma_split
+                    .iter()
+                    .map(|v| v.trim().to_string())
+                    .collect::<Vec<String>>(),
+            );
+        }
 
         let bracket_variants = variants
             .iter()
