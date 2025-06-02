@@ -10,6 +10,7 @@ pub struct AppConfig {
     pub validation: ValidationConfig,
     pub deck_config: DeckConfig,
     pub special_letters: SpecialLetters,
+    pub keybindings: KeybindsConfig,
 }
 
 impl AppConfig {
@@ -31,6 +32,32 @@ impl AppConfig {
             }
         } else {
             Ok(Self::default())
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize, Debug, PartialEq, Clone)]
+#[serde(default, deny_unknown_fields)]
+pub struct KeybindsConfig {
+    pub skip: char,
+    pub accept_anyway: char,
+    pub reject_anyway: char,
+    pub force_quit: char,
+    pub save_and_quit: char,
+    pub edit_mode: char,
+    pub help: char,
+}
+
+impl Default for KeybindsConfig {
+    fn default() -> Self {
+        Self {
+            skip: 's',
+            accept_anyway: 'a',
+            reject_anyway: 'r',
+            force_quit: 'Q',
+            save_and_quit: 'w',
+            edit_mode: 'i',
+            help: 'h',
         }
     }
 }

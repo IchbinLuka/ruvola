@@ -257,18 +257,19 @@ impl App {
     }
 
     fn handle_key_events(&mut self, event: KeyEvent) -> KeyHandleResult {
+        let keybinds = &self.config.keybindings;
         match self.input_mode {
             InputMode::Normal => match event.code {
-                KeyCode::Char('e') => {
+                KeyCode::Char(c) if c == keybinds.edit_mode => {
                     if let CurrentScreen::Review { correct: true } = &self.current_screen {
                         return KeyHandleResult::None;
                     }
                     self.input_mode = InputMode::Editing;
                 }
-                KeyCode::Char('Q') => {
+                KeyCode::Char(c) if c == keybinds.force_quit => {
                     return KeyHandleResult::Quit { save: false };
                 }
-                KeyCode::Char('w') => {
+                KeyCode::Char(c) if c == keybinds.save_and_quit => {
                     return KeyHandleResult::Quit { save: true };
                 }
                 KeyCode::Enter => {
@@ -276,26 +277,31 @@ impl App {
                         self.next_card(true);
                     }
                 }
-                KeyCode::Char('a') => {
+                KeyCode::Char(c) if c == keybinds.accept_anyway => {
                     if let CurrentScreen::Review { correct } = &self.current_screen {
                         if !correct {
                             self.next_card(true);
                         }
                     }
                 }
-                KeyCode::Char('r') => {
+                KeyCode::Char(c) if c == keybinds.reject_anyway => {
                     if let CurrentScreen::Review { correct } = &self.current_screen {
                         if *correct {
                             self.next_card(false);
                         }
                     }
                 }
-                KeyCode::Char('s') if matches!(self.current_screen, CurrentScreen::Query) => {
+                KeyCode::Char(c)
+                    if c == keybinds.skip
+                        && matches!(self.current_screen, CurrentScreen::Query) =>
+                {
                     self.reset_input();
                     self.voca_session.skip_card();
                 }
-                KeyCode::Char('h') => {
-                    self.popup = Some(Box::new(HelpWidget));
+                KeyCode::Char(c) if c == keybinds.help => {
+                    self.popup = Some(Box::new(HelpWidget {
+                        keybinds: self.config.keybindings.clone(),
+                    }));
                 }
                 _ => {}
             },
@@ -373,16 +379,29 @@ impl App {
 
         let [vocab_prompt_area, input_area, correct_answer_area] = horizontal.areas(prompt_area);
 
+        let keybinds = &self.config.keybindings;
         let msg = match self.input_mode {
             InputMode::Normal => match self.current_screen {
                 CurrentScreen::Review { correct } => {
                     if correct {
-                        vec!["Press ".into(), "r".bold(), " to reject anyway".into()]
+                        vec![
+                            "Press ".into(),
+                            keybinds.reject_anyway.to_string().bold(),
+                            " to reject anyway".into(),
+                        ]
                     } else {
-                        vec!["Press ".into(), "a".bold(), " to accept anyway".into()]
+                        vec![
+                            "Press ".into(),
+                            keybinds.accept_anyway.to_string().bold(),
+                            " to accept anyway".into(),
+                        ]
                     }
                 }
-                _ => vec!["Press ".into(), "h".bold(), " to show keybinds".into()],
+                _ => vec![
+                    "Press ".into(),
+                    keybinds.help.to_string().bold(),
+                    " to show keybinds".into(),
+                ],
             },
             InputMode::Editing => vec![
                 "Press ".into(),
@@ -575,7 +594,9 @@ impl Widget for NoCardsLeftScreen {
     }
 }
 
-struct HelpWidget;
+struct HelpWidget {
+    keybinds: config::KeybindsConfig,
+}
 
 impl Popup for HelpWidget {
     fn handle_events(&self, event: Event) -> PopupEventResult {
@@ -589,21 +610,21 @@ impl Popup for HelpWidget {
     }
 
     fn draw(&self, frame: &mut Frame) {
-        const KEYBINDINGS: [(&str, &str); 9] = [
-            ("Q", "Quit without saving"),
-            ("w", "Save and quit"),
-            ("a", "Accept anyway"),
-            ("r", "Reject anyway"),
+        let keybindings: [(&str, &str); 9] = [
+            (&self.keybinds.force_quit.to_string(), "Quit without saving"),
+            (&self.keybinds.save_and_quit.to_string(), "Save and quit"),
+            (&self.keybinds.accept_anyway.to_string(), "Accept anyway"),
+            (&self.keybinds.reject_anyway.to_string(), "Reject anyway"),
             ("Esc", "Stop editing"),
             ("Ctrl+Space", "Show all special letters (in edit mode)"),
             (
                 "Ctrl+<Key>",
                 "Show special letters for <Key> (in edit mode)",
             ),
-            ("e", "Enter edit mode"),
-            ("s", "Skip"),
+            (&self.keybinds.edit_mode.to_string(), "Enter edit mode"),
+            (&self.keybinds.skip.to_string(), "Skip"),
         ];
-        let rows = KEYBINDINGS
+        let rows = keybindings
             .iter()
             .map(|(key, desc)| {
                 let key = Text::from(Line::from(vec![key.bold(), ": ".into()]));
@@ -612,13 +633,13 @@ impl Popup for HelpWidget {
             })
             .collect::<Vec<_>>();
 
-        let keys_width = KEYBINDINGS
+        let keys_width = keybindings
             .iter()
             .map(|(key, _)| key.len())
             .max()
             .unwrap_or(0) as u16
             + 1;
-        let desc_width = KEYBINDINGS.iter().map(|(_, d)| d.len()).max().unwrap_or(0) as u16;
+        let desc_width = keybindings.iter().map(|(_, d)| d.len()).max().unwrap_or(0) as u16;
         let table = Table::new(
             rows,
             [
@@ -635,7 +656,7 @@ impl Popup for HelpWidget {
         let [help_area] = Layout::horizontal([Constraint::Max(keys_width + desc_width + 5)])
             .flex(Flex::Center)
             .areas(frame.area());
-        let [help_area] = Layout::vertical([Constraint::Max(KEYBINDINGS.len() as u16 + 4)])
+        let [help_area] = Layout::vertical([Constraint::Max(keybindings.len() as u16 + 4)])
             .flex(Flex::Center)
             .areas(help_area);
         frame.render_widget(Clear, help_area);

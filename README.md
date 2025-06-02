@@ -37,10 +37,10 @@ For a full list of parameters, run `ruvola -h`.
 > ruvola vocabs.tsv
 ```
 
-## Keybindings
+## Default Keybindings
 | Key | Action |
 |------------|--------|
-| `e`        | Enter Edit Mode | 
+| `i`        | Enter Edit Mode | 
 | `Enter`    | Submit the current buffer |
 | `w`        | Save and quit |
 | `Q`        | Quit without saving |

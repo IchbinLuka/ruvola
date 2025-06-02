@@ -9,6 +9,15 @@ tolerance_min_length = 5
 [deck_config]
 deck_intervals = [0, "12h", 1, 7, 14, 30, 60, 90, 180, 365]
 
+[keybindings]
+skip = 's'
+accept_anyway = 'a'
+reject_anyway = 'r'
+force_quit = 'Q'
+save_and_quit = 'w'
+edit_mode = 'i'
+help = 'h'
+
 [special_letters]
 de = [
     { base = "a", special = ["Ä", "ä"] }, 
