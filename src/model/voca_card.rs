@@ -4,14 +4,14 @@ use chrono::{DateTime, NaiveDateTime};
 
 use crate::FilterMode;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Vocab {
     pub word_a: VocabWord,
     pub word_b: VocabWord,
     pub metadata: Option<VocabMetadata>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VocabWord {
     pub base: String,
     pub variants: Vec<String>,
@@ -194,7 +194,7 @@ impl VocaLineError {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VocaCardDataset {
     pub cards: Vec<Vocab>,
     pub file_path: String,

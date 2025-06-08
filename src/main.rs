@@ -26,7 +26,7 @@ fn main() -> Result<()> {
     let session = VocaSession::from_files(
         &args.file_paths,
         (&args).try_into()?,
-        args.sort,
+        (&args).try_into()?,
         args.limit,
         &config.memorization,
     )?;
@@ -61,11 +61,40 @@ struct Arguments {
     /// Sort the cards by their due date
     #[arg(short, long)]
     sort: bool,
+    /// Use the random order for the cards
+    #[arg(short, long)]
+    random: bool,
     /// Path to a local config file that overrides attributes of the global config file
     #[arg(long)]
     override_config_file: Option<String>,
     /// Paths to the vocab files
     file_paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum SortMode {
+    DueDate,
+    Random,
+    Original,
+}
+
+impl TryFrom<&Arguments> for SortMode {
+    type Error = anyhow::Error;
+
+    fn try_from(args: &Arguments) -> Result<Self> {
+        if args.sort && args.random {
+            return Err(anyhow::anyhow!(
+                "Cannot sort by due date and random order at the same time"
+            ));
+        }
+        Ok(if args.sort {
+            SortMode::DueDate
+        } else if args.random {
+            SortMode::Random
+        } else {
+            SortMode::Original
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

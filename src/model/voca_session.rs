@@ -1,7 +1,9 @@
 use std::collections::VecDeque;
 
+use rand::seq::SliceRandom;
+
 use crate::{
-    FilterMode,
+    FilterMode, SortMode,
     config::{DeckConfig, MemorizationConfig, ValidationConfig},
 };
 
@@ -49,7 +51,7 @@ impl VocaSession {
     fn new(
         datasets: Vec<VocaCardDataset>,
         filter_mode: FilterMode,
-        sorted: bool,
+        sort_mode: SortMode,
         limit: Option<usize>,
         memorization_config: &MemorizationConfig,
     ) -> Self {
@@ -70,22 +72,31 @@ impl VocaSession {
                     .map(move |(j, card)| ((i, j), card))
             })
             .collect::<Vec<_>>();
-        if sorted {
-            all_vocabs.sort_by(
-                |(_, Vocab { metadata: a, .. }), (_, Vocab { metadata: b, .. })| {
-                    if let Some(a) = a {
-                        if let Some(b) = b {
-                            a.due_date.cmp(&b.due_date)
+        match sort_mode {
+            SortMode::DueDate => {
+                all_vocabs.sort_by(
+                    |(_, Vocab { metadata: a, .. }), (_, Vocab { metadata: b, .. })| {
+                        if let Some(a) = a {
+                            if let Some(b) = b {
+                                a.due_date.cmp(&b.due_date)
+                            } else {
+                                std::cmp::Ordering::Greater
+                            }
+                        } else if b.is_some() {
+                            std::cmp::Ordering::Less
                         } else {
-                            std::cmp::Ordering::Greater
+                            std::cmp::Ordering::Equal
                         }
-                    } else if b.is_some() {
-                        std::cmp::Ordering::Less
-                    } else {
-                        std::cmp::Ordering::Equal
-                    }
-                },
-            );
+                    },
+                );
+            }
+            SortMode::Random => {
+                let mut rng = rand::rng();
+                all_vocabs.shuffle(&mut rng);
+            }
+            SortMode::Original => {
+                // No sorting, keep original order
+            }
         }
         for ((i, j), card) in all_vocabs {
             if let Some(limit) = limit {
@@ -276,7 +287,7 @@ impl VocaSession {
     pub fn from_files(
         file_paths: &[String],
         filter_mode: FilterMode,
-        sorted: bool,
+        sort_mode: SortMode,
         limit: Option<usize>,
         memorization_config: &MemorizationConfig,
     ) -> Result<Self, VocaParseError> {
@@ -287,7 +298,7 @@ impl VocaSession {
         Ok(VocaSession::new(
             datasets,
             filter_mode,
-            sorted,
+            sort_mode,
             limit,
             memorization_config,
         ))
@@ -365,9 +376,9 @@ mod tests {
         };
 
         let session = VocaSession::new(
-            vec![dataset],
+            vec![dataset.clone()],
             FilterMode::All,
-            true,
+            SortMode::DueDate,
             None,
             &MemorizationConfig::default(),
         );
@@ -376,6 +387,16 @@ mod tests {
         assert_eq!(session.queue[0].card, 2); // "test"
         assert_eq!(session.queue[1].card, 1); // "world"
         assert_eq!(session.queue[2].card, 0); // "hello"
+
+        let session = VocaSession::new(
+            vec![dataset],
+            FilterMode::All,
+            SortMode::Random,
+            None,
+            &MemorizationConfig::default(),
+        );
+
+        assert_eq!(session.queue.len(), 6);
     }
 
     #[test]
