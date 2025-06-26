@@ -1,13 +1,23 @@
 [memorization]
+# For vocabularies that have not been presented to the user yet, you
+# can enable a memorization round where both the query and answer are
+# shown.
 do_memorization_round = true
 memorization_reversed = false
 
 [validation]
+# The maximum edit distance for a word to be considered correct
 error_tolerance = 2
+# For words with a length of less than this, the error tolerance is set to 0
 tolerance_min_length = 5
 
 [deck_config]
+# The interval of each deck. Must be either a number, representing the 
+# duration in days or a string in the format "(<number><unit>)*" 
+# (e.g. "1d", "1d2h3m5s")
 deck_intervals = [0, "12h", 1, 7, 14, 30, 60, 90, 180, 365]
+# Whether the deck numbers should be changed when in ignore-date mode
+change_deck_in_ignore_date = false
 
 [keybindings]
 skip = 's'

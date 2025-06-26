@@ -79,6 +79,17 @@ tolerance_min_length = 5
 # duration in days or a string in the format "(<number><unit>)*" 
 # (e.g. "1d", "1d2h3m5s")
 deck_intervals = [0, "12h", 1, 7, 14, 30, 60, 90, 180, 365]
+# Whether the deck numbers should be changed when in ignore-date mode
+change_deck_in_ignore_date = false
+
+[keybindings]
+skip = 's'
+accept_anyway = 'a'
+reject_anyway = 'r'
+force_quit = 'Q'
+save_and_quit = 'w'
+edit_mode = 'i'
+help = 'h'
 
 [special_letters]
 de = [

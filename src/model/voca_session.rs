@@ -45,6 +45,7 @@ pub struct VocaSession {
     queue: VecDeque<VocabItem>,
     has_changes: bool,
     total_due: usize,
+    filter_mode: FilterMode,
 }
 
 impl VocaSession {
@@ -153,6 +154,7 @@ impl VocaSession {
             queue: queue_unseen,
             has_changes: false,
             total_due,
+            filter_mode,
         }
     }
 
@@ -230,16 +232,25 @@ impl VocaSession {
             self.has_changes = true;
             return;
         }
-
+        let change_deck =
+            !matches!(self.filter_mode, FilterMode::All) || deck_config.change_deck_in_ignore_date;
         if answer_correct {
-            let new_deck = (current_deck + 1).min(deck_durations.len() as u8 - 1);
+            let new_deck = if change_deck {
+                (current_deck + 1).min(deck_durations.len() as u8 - 1)
+            } else {
+                current_deck
+            };
             card_mut.update_metadata(
                 new_deck,
                 current_date + deck_durations[new_deck as usize].0,
                 current_item.reverse,
             );
         } else {
-            let new_deck = (current_deck as i16 - 1).max(0) as u8;
+            let new_deck = if change_deck {
+                (current_deck as i16 - 1).max(0) as u8
+            } else {
+                current_deck
+            };
             card_mut.update_metadata(
                 new_deck,
                 current_date + deck_durations[new_deck as usize].0,

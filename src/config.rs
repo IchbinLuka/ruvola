@@ -109,6 +109,7 @@ pub struct SpecialLettersConfig {
 pub struct DeckConfig {
     #[serde(alias = "deck_durations")]
     pub deck_intervals: Vec<DeckInverval>,
+    pub change_deck_in_ignore_date: bool,
 }
 
 impl Default for DeckConfig {
@@ -118,6 +119,7 @@ impl Default for DeckConfig {
                 .iter()
                 .map(|&days| DeckInverval(Duration::days(days)))
                 .collect(),
+            change_deck_in_ignore_date: false,
         }
     }
 }
